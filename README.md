@@ -41,7 +41,9 @@ sudo ./scripts/install.sh
 ```
 
 What the script does:
-1. Installs all OS dependencies (Chromium, Xorg, matchbox, Python libs, etc.).
+1. Installs all OS dependencies (Chromium, Xorg, matchbox, Python libs, etc.). It
+   automatically picks the correct Chromium package name (`chromium` vs
+   `chromium-browser`) for your distro.
 2. Enables I²C and creates the `kiosk` user with tty1 autologin.
 3. Creates a Python venv in `/opt/pi-kiosk/venv` and installs this package via
    `pip install` (reinstalling on every run so `git pull` updates take effect).
@@ -71,6 +73,8 @@ simply refresh binaries, the venv, and systemd units.
    - Flip `ENABLE_VNC=true` and optionally set `VNC_PASSWORD_FILE` (created via
      `sudo -u kiosk x11vnc -storepasswd /etc/pi-kiosk/x11vnc.pass`) if you want
      remote viewing.
+   - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
+     with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
 4. Customize any sensor thresholds or brightness bounds while you are there.
 5. Reboot (or `sudo systemctl restart kiosk-browser@kiosk kiosk-sensors`).
 

@@ -19,7 +19,6 @@ APT_PACKAGES=(
   python3-dev
   git
   i2c-tools
-  chromium-browser
   xserver-xorg
   x11-xserver-utils
   xinit
@@ -32,6 +31,23 @@ APT_PACKAGES=(
 echo "Installing APT dependencies..."
 apt-get update
 apt-get install -y "${APT_PACKAGES[@]}"
+
+echo "Ensuring Chromium is installed..."
+CHROMIUM_CANDIDATES=(chromium-browser chromium)
+CHROMIUM_INSTALLED=""
+for candidate in "${CHROMIUM_CANDIDATES[@]}"; do
+  if apt-cache show "${candidate}" >/dev/null 2>&1; then
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y "${candidate}"; then
+      CHROMIUM_INSTALLED="${candidate}"
+      break
+    fi
+  fi
+done
+
+if [[ -z "${CHROMIUM_INSTALLED}" ]]; then
+  echo "Failed to install Chromium (checked: ${CHROMIUM_CANDIDATES[*]})." >&2
+  exit 1
+fi
 
 if command -v raspi-config >/dev/null 2>&1; then
   echo "Enabling I²C bus..."

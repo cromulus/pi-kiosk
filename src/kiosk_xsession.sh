@@ -9,9 +9,26 @@ fi
 
 export DISPLAY="${DISPLAY:-:0}"
 
-CHROMIUM_BIN="${CHROMIUM_BIN:-/usr/bin/chromium-browser}"
-if [[ ! -x "${CHROMIUM_BIN}" ]]; then
-  echo "Chromium not found at ${CHROMIUM_BIN}" >&2
+if [[ -n "${CHROMIUM_BIN:-}" ]]; then
+  CANDIDATES=("${CHROMIUM_BIN}")
+else
+  CANDIDATES=(
+    /usr/bin/chromium-browser
+    /usr/bin/chromium
+    /snap/bin/chromium
+  )
+fi
+
+CHROMIUM_BIN=""
+for candidate in "${CANDIDATES[@]}"; do
+  if [[ -x "${candidate}" ]]; then
+    CHROMIUM_BIN="${candidate}"
+    break
+  fi
+done
+
+if [[ -z "${CHROMIUM_BIN}" ]]; then
+  echo "Chromium executable not found. Checked: ${CANDIDATES[*]}" >&2
   exit 1
 fi
 
