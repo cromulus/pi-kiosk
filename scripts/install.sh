@@ -26,6 +26,7 @@ APT_PACKAGES=(
   matchbox-window-manager
   unclutter
   brightnessctl
+  x11vnc
 )
 
 echo "Installing APT dependencies..."
@@ -62,6 +63,7 @@ fi
 echo "Deploying launcher scripts..."
 install -m 755 "${REPO_ROOT}/src/launch_kiosk.sh" /usr/local/bin/launch_kiosk.sh
 install -m 755 "${REPO_ROOT}/src/kiosk_xsession.sh" /usr/local/bin/kiosk_xsession.sh
+install -m 755 "${REPO_ROOT}/src/launch_vnc.sh" /usr/local/bin/launch_vnc.sh
 
 echo "Preparing configuration..."
 install -d "${CONFIG_DIR}"
@@ -76,9 +78,23 @@ install -m 644 "${REPO_ROOT}/services/kiosk-browser.service" \
   "${SYSTEMD_DIR}/kiosk-browser@.service"
 install -m 644 "${REPO_ROOT}/services/kiosk-sensors.service" \
   "${SYSTEMD_DIR}/kiosk-sensors.service"
+install -m 644 "${REPO_ROOT}/services/kiosk-vnc.service" \
+  "${SYSTEMD_DIR}/kiosk-vnc.service"
 
 systemctl daemon-reload
 systemctl enable --now "kiosk-browser@${KIOSK_USER}.service"
 systemctl enable --now kiosk-sensors.service
+
+ENABLE_VNC="false"
+if [[ -f "${CONFIG_DIR}/kiosk.env" ]]; then
+  # shellcheck disable=SC1091
+  source "${CONFIG_DIR}/kiosk.env"
+fi
+
+if [[ "${ENABLE_VNC,,}" == "true" ]]; then
+  systemctl enable --now kiosk-vnc.service
+else
+  systemctl disable --now kiosk-vnc.service >/dev/null 2>&1 || true
+fi
 
 echo "Setup complete. Review ${CONFIG_DIR}/kiosk.env and reboot when ready."

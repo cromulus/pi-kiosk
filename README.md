@@ -16,6 +16,7 @@ script re-applies everything, so the Pi can stay locked down and reproducible.
 - Typed configuration backed by Pydantic makes it easy to tweak thresholds while
   catching invalid values early. Switch sensors on/off individually and opt into
   JSON logs for ingestion.
+- Optional x11vnc service mirrors the kiosk display so you can check in remotely.
 
 ## Hardware quick reference
 - **I²C wiring** (Pi GPIO header pins)
@@ -67,6 +68,9 @@ simply refresh binaries, the venv, and systemd units.
      something like Loki/Elasticsearch.
    - Disable missing hardware by setting `ENABLE_DISTANCE_SENSOR=false` or
      `ENABLE_LIGHT_SENSOR=false`.
+   - Flip `ENABLE_VNC=true` and optionally set `VNC_PASSWORD_FILE` (created via
+     `sudo -u kiosk x11vnc -storepasswd /etc/pi-kiosk/x11vnc.pass`) if you want
+     remote viewing.
 4. Customize any sensor thresholds or brightness bounds while you are there.
 5. Reboot (or `sudo systemctl restart kiosk-browser@kiosk kiosk-sensors`).
 
@@ -82,6 +86,9 @@ simply refresh binaries, the venv, and systemd units.
     `DEFAULT_BRIGHTNESS` if the light sensor is missing.
   - Reports sensor health every minute and emits DEBUG logs per reading when
     enabled.
+- `kiosk-vnc.service`  
+  (Optional) Runs x11vnc bound to the kiosk X session. Enable it by setting
+  `ENABLE_VNC=true` in the config and rerunning the installer.
 
 Both services default to the `kiosk` user and restart automatically if they
 crash. Journald captures logs (`journalctl -u kiosk-sensors.service`).
@@ -90,6 +97,9 @@ crash. Journald captures logs (`journalctl -u kiosk-sensors.service`).
 - Missing sensors: the Python daemon keeps running, uses the fallback brightness,
   and never blanks the screen based on motion (since it has none). You can also
   flip `ENABLE_DISTANCE_SENSOR/LIGHT` to false to suppress repeated retries.
+- Remote viewing: VNC is disabled by default. When enabled, it respects the port
+  and password file you configure; leave the password blank only on trusted
+  networks.
 - Missing brightness utility: you can point `BACKLIGHT_PATH` to
   `/sys/class/backlight/.../brightness` if `brightnessctl` is not viable.
 - Chromium token safety: the URL is constructed runtime so the token never lives

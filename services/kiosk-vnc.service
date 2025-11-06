@@ -1,0 +1,19 @@
+[Unit]
+Description=VNC mirror of the kiosk display
+After=graphical.target kiosk-browser@kiosk.service
+Wants=kiosk-browser@kiosk.service
+ConditionPathExists=/usr/bin/x11vnc
+
+[Service]
+Type=simple
+User=kiosk
+EnvironmentFile=/etc/pi-kiosk/kiosk.env
+WorkingDirectory=/home/kiosk
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/kiosk/.Xauthority
+ExecStart=/usr/local/bin/launch_vnc.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

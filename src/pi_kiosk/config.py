@@ -76,6 +76,21 @@ class KioskConfig(BaseModel):
         default=True, validation_alias="ENABLE_LIGHT_SENSOR"
     )
 
+    enable_vnc: bool = Field(default=False, validation_alias="ENABLE_VNC")
+    vnc_port: int = Field(default=5900, validation_alias="VNC_PORT", ge=1024, le=65535)
+    vnc_password_file: str | None = Field(
+        default=None, validation_alias="VNC_PASSWORD_FILE"
+    )
+    vnc_extra_args: str = Field(default="-shared -loop", validation_alias="VNC_EXTRA_ARGS")
+
+    @field_validator("vnc_password_file", mode="before")
+    @classmethod
+    def _empty_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
     @field_validator("brightness_max")
     @classmethod
     def _validate_brightness_range(cls, value: int, info: FieldValidationInfo) -> int:
