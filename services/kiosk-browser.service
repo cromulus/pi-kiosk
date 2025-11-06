@@ -1,0 +1,16 @@
+[Unit]
+Description=Chromium Home Assistant kiosk
+After=systemd-user-sessions.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+EnvironmentFile=/etc/pi-kiosk/kiosk.env
+WorkingDirectory=/home/%i
+ExecStart=/usr/local/bin/launch_kiosk.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

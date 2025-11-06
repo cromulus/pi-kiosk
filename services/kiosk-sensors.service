@@ -1,0 +1,14 @@
+[Unit]
+Description=Sensor-driven screen + brightness control for the kiosk
+After=multi-user.target
+
+[Service]
+Type=simple
+User=kiosk
+EnvironmentFile=/etc/pi-kiosk/kiosk.env
+ExecStart=/opt/pi-kiosk/venv/bin/python /opt/pi-kiosk/kiosk_sensors.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
