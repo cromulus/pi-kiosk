@@ -51,14 +51,13 @@ ExecStart=-/sbin/agetty --autologin ${KIOSK_USER} --noclear %I \$TERM
 EOF
 
 install -d -o "${KIOSK_USER}" -g "${KIOSK_USER}" "${APP_DIR}"
-install -m 644 "${REPO_ROOT}/src/kiosk_sensors.py" "${APP_DIR}/kiosk_sensors.py"
 
 echo "Setting up Python virtual environment..."
 if [[ ! -d "${APP_DIR}/venv" ]]; then
   python3 -m venv "${APP_DIR}/venv"
 fi
 "${APP_DIR}/venv/bin/pip" install --upgrade pip
-"${APP_DIR}/venv/bin/pip" install -r "${REPO_ROOT}/requirements.txt"
+"${APP_DIR}/venv/bin/pip" install --upgrade --force-reinstall "${REPO_ROOT}"
 
 echo "Deploying launcher scripts..."
 install -m 755 "${REPO_ROOT}/src/launch_kiosk.sh" /usr/local/bin/launch_kiosk.sh

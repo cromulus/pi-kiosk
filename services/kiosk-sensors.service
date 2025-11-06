@@ -6,7 +6,7 @@ After=multi-user.target
 Type=simple
 User=kiosk
 EnvironmentFile=/etc/pi-kiosk/kiosk.env
-ExecStart=/opt/pi-kiosk/venv/bin/python /opt/pi-kiosk/kiosk_sensors.py
+ExecStart=/opt/pi-kiosk/venv/bin/kiosk-sensors --config /etc/pi-kiosk/kiosk.env
 Restart=always
 RestartSec=5
 

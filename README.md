@@ -9,10 +9,13 @@ script re-applies everything, so the Pi can stay locked down and reproducible.
 - Chromium launches in kiosk mode on boot and loads your HA dashboard using a
   dedicated long-lived token.
 - Sensor daemon drives screen wake/sleep plus brightness (Adafruit VL53L4CX +
-  VEML7700). If the sensors or I²C bus disappear, the daemon falls back to safe
-  defaults so the kiosk still runs.
+  VEML7700). The new modular controller keeps track of sensor health, retries with
+  backoff, and falls back to safe defaults when hardware is missing.
 - Systemd units, autologin, and scripts that can be redeployed idempotently via
   `sudo ./scripts/install.sh`.
+- Typed configuration backed by Pydantic makes it easy to tweak thresholds while
+  catching invalid values early. Switch sensors on/off individually and opt into
+  JSON logs for ingestion.
 
 ## Hardware quick reference
 - **I²C wiring** (Pi GPIO header pins)
@@ -39,8 +42,9 @@ sudo ./scripts/install.sh
 What the script does:
 1. Installs all OS dependencies (Chromium, Xorg, matchbox, Python libs, etc.).
 2. Enables I²C and creates the `kiosk` user with tty1 autologin.
-3. Copies the Python + shell helpers into `/opt/pi-kiosk` and `/usr/local/bin`.
-4. Creates a Python venv and installs `requirements.txt`.
+3. Creates a Python venv in `/opt/pi-kiosk/venv` and installs this package via
+   `pip install` (reinstalling on every run so `git pull` updates take effect).
+4. Copies the shell helpers into `/usr/local/bin`.
 5. Drops a config file in `/etc/pi-kiosk/kiosk.env` (only created if missing).
 6. Installs + enables `kiosk-browser@kiosk.service` and `kiosk-sensors.service`.
 
@@ -56,6 +60,13 @@ simply refresh binaries, the venv, and systemd units.
    - Paste the token into `HA_LONG_LIVED_TOKEN`.
    - Optional: add `HA_EXTRA_QUERY="kiosk=true"` if you use the kiosk-mode
      frontend plugin.
+   - Adjust the typed knobs (`DISTANCE_THRESHOLD_MM`, `BRIGHTNESS_MIN/MAX`,
+     `POLL_INTERVAL_SEC`, etc.). The controller validates these at startup so
+     misconfigurations fail fast.
+   - Toggle structured logging with `LOG_JSON=true` if you want to ship events to
+     something like Loki/Elasticsearch.
+   - Disable missing hardware by setting `ENABLE_DISTANCE_SENSOR=false` or
+     `ENABLE_LIGHT_SENSOR=false`.
 4. Customize any sensor thresholds or brightness bounds while you are there.
 5. Reboot (or `sudo systemctl restart kiosk-browser@kiosk kiosk-sensors`).
 
@@ -64,18 +75,21 @@ simply refresh binaries, the venv, and systemd units.
   Launches Xorg + Chromium on VT7 in full kiosk mode. Controlled by
   `/usr/local/bin/launch_kiosk.sh` and `kiosk_xsession.sh`.
 - `kiosk-sensors.service`  
-  Runs `src/kiosk_sensors.py` inside `/opt/pi-kiosk/venv`. It:
+  Runs the `kiosk-sensors` console script from the venv, which:
   - Wakes the display when someone enters `DISTANCE_THRESHOLD_MM`.
   - Blanks after `INACTIVITY_TIMEOUT_SEC` (only if the ToF sensor is working).
   - Scales brightness based on ambient lux, falling back to
     `DEFAULT_BRIGHTNESS` if the light sensor is missing.
+  - Reports sensor health every minute and emits DEBUG logs per reading when
+    enabled.
 
 Both services default to the `kiosk` user and restart automatically if they
 crash. Journald captures logs (`journalctl -u kiosk-sensors.service`).
 
 ## Resilience notes
 - Missing sensors: the Python daemon keeps running, uses the fallback brightness,
-  and never blanks the screen based on motion (since it has none).
+  and never blanks the screen based on motion (since it has none). You can also
+  flip `ENABLE_DISTANCE_SENSOR/LIGHT` to false to suppress repeated retries.
 - Missing brightness utility: you can point `BACKLIGHT_PATH` to
   `/sys/class/backlight/.../brightness` if `brightnessctl` is not viable.
 - Chromium token safety: the URL is constructed runtime so the token never lives
