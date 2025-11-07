@@ -422,8 +422,17 @@ install -m 644 "${REPO_ROOT}/services/kiosk-vnc.service" \
   "${SYSTEMD_DIR}/kiosk-vnc.service"
 
 systemctl daemon-reload
-systemctl enable --now "kiosk-browser@${KIOSK_USER}.service"
-systemctl enable --now kiosk-sensors.service
+if systemctl is-enabled "kiosk-browser@${KIOSK_USER}.service" >/dev/null 2>&1; then
+  systemctl restart "kiosk-browser@${KIOSK_USER}.service"
+else
+  systemctl enable --now "kiosk-browser@${KIOSK_USER}.service"
+fi
+
+if systemctl is-enabled kiosk-sensors.service >/dev/null 2>&1; then
+  systemctl restart kiosk-sensors.service
+else
+  systemctl enable --now kiosk-sensors.service
+fi
 
 XWRAPPER="/etc/X11/Xwrapper.config"
 cat <<'EOF' >"${XWRAPPER}"
@@ -433,7 +442,11 @@ EOF
 
 load_existing_config
 if [[ "${ENABLE_VNC,,}" == "true" ]]; then
-  systemctl enable --now kiosk-vnc.service
+  if systemctl is-enabled kiosk-vnc.service >/dev/null 2>&1; then
+    systemctl restart kiosk-vnc.service
+  else
+    systemctl enable --now kiosk-vnc.service
+  fi
 else
   systemctl disable --now kiosk-vnc.service >/dev/null 2>&1 || true
 fi
