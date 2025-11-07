@@ -40,6 +40,13 @@ git pull            # future updates are just pull + rerun
 sudo ./scripts/install.sh
 ```
 
+The installer now walks you through the key runtime choices: kiosk user, HA URL,
+sensor usage, backlight path, and whether to enable the optional VNC mirror. It
+auto-detects sane defaults for a Raspberry Pi 5 + Pi Display 2 (Debian Trixie),
+but you can accept or override each prompt. Set `PI_KIOSK_ASSUME_DEFAULTS=1`
+when running the script if you need a fully non-interactive run (CI, Ansible,
+etc.)—it will reuse whatever is already in `/etc/pi-kiosk/kiosk.env`.
+
 What the script does:
 1. Installs all OS dependencies (Chromium, Xorg, matchbox, Python libs, etc.). It
    automatically picks the correct Chromium package name (`chromium` vs
@@ -58,7 +65,8 @@ simply refresh binaries, the venv, and systemd units.
 1. Create a dedicated HA user (e.g., `kiosk`) with the minimum Lovelace access
    you need.
 2. Generate a Long-Lived Access Token for that user.
-3. Edit `/etc/pi-kiosk/kiosk.env` (created from `config/kiosk.env.sample`):
+3. Edit `/etc/pi-kiosk/kiosk.env` (created from `config/kiosk.env.sample` and
+   auto-tuned by the installer):
    - Set `HA_BASE_URL` to the dashboard URL you want to load.
    - Paste the token into `HA_LONG_LIVED_TOKEN`.
    - Optional: add `HA_EXTRA_QUERY="kiosk=true"` if you use the kiosk-mode
@@ -75,9 +83,12 @@ simply refresh binaries, the venv, and systemd units.
      remote viewing.
    - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
      with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
+   - Backlight control defaults to writing directly to the detected sysfs node
+     (`/sys/class/backlight/11-0045/brightness` on the Pi Display 2). Only set
+     `BRIGHTNESSCTL_*` if you intentionally want to use `brightnessctl`.
    - You normally do not need to touch group membership or Xorg permissions—the
-     install script already adds the `kiosk` user to `video,input` and configures
-     `/etc/X11/Xwrapper.config` with `allowed_users=anybody`.
+     install script already adds the `kiosk` user to `video,input,render` and
+     configures `/etc/X11/Xwrapper.config` with `allowed_users=anybody`.
 4. Customize any sensor thresholds or brightness bounds while you are there.
 5. Reboot (or `sudo systemctl restart kiosk-browser@kiosk kiosk-sensors`).
 
