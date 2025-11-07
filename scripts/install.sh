@@ -16,6 +16,8 @@ SYSTEMD_DIR="/etc/systemd/system"
 ASSUME_DEFAULTS="${PI_KIOSK_ASSUME_DEFAULTS:-0}"
 RESET=0
 UNINSTALL=0
+VNC_PASSWORD_VALUE=""
+INSTALLED=0
 
 APT_PACKAGES=(
   python3
@@ -63,6 +65,28 @@ done
 if [[ "${UNINSTALL}" == "1" && "${RESET}" == "1" ]]; then
   echo "Choose either --reset or --uninstall, not both." >&2
   exit 1
+fi
+
+if [[ -d "${APP_DIR}" ]] || [[ -f "${SYSTEMD_DIR}/kiosk-browser@.service" ]]; then
+  INSTALLED=1
+fi
+
+if [[ "${INSTALLED}" == "1" && "${RESET}" == "0" && "${UNINSTALL}" == "0" ]]; then
+  if [[ "${ASSUME_DEFAULTS}" == "1" ]]; then
+    RESET=0
+    UNINSTALL=0
+  else
+    echo "Existing Pi Kiosk installation detected."
+    while true; do
+      read -r -p "Choose action: [U]pdate/[R]eset/[X] Uninstall (default U): " action
+      case "${action,,}" in
+        ""|u|update) RESET=0; UNINSTALL=0; break ;;
+        r|reset) RESET=1; UNINSTALL=0; break ;;
+        x|uninstall) UNINSTALL=1; RESET=0; break ;;
+        *) echo "Please enter U, R, or X." ;;
+      esac
+    done
+  fi
 fi
 
 log_step() {
@@ -203,32 +227,34 @@ configure_runtime() {
   set_env_var ENABLE_DISTANCE_SENSOR "${enable_dist}"
   set_env_var ENABLE_LIGHT_SENSOR "${enable_light}"
 
-  local backlight_default
-  backlight_default="${BACKLIGHT_PATH:-$(detect_backlight_path)}"
-  local backlight_path
-  backlight_path=$(prompt_string "Backlight path (brightness file)" "${backlight_default}")
-  set_env_var BACKLIGHT_PATH "\"${backlight_path}\""
-
   local brightnessctl_present="false"
   if command -v brightnessctl >/dev/null 2>&1; then
     brightnessctl_present="true"
   fi
-  local default_use_bctl="${BRIGHTNESSCTL_BIN:+true}"
-  if [[ -z "${default_use_bctl}" ]]; then
+  local default_use_bctl
+  if [[ -n "${BRIGHTNESSCTL_BIN:-}" ]]; then
+    default_use_bctl="true"
+  elif [[ -n "${BACKLIGHT_PATH:-}" ]]; then
+    default_use_bctl="false"
+  else
     default_use_bctl="${brightnessctl_present}"
   fi
-  [[ -z "${default_use_bctl}" ]] && default_use_bctl="false"
+  [[ -z "${default_use_bctl}" ]] && default_use_bctl="true"
 
   local use_bctl
-  use_bctl=$(prompt_bool "Use brightnessctl for dimming (otherwise write to sysfs)" "${default_use_bctl}")
+  use_bctl=$(prompt_bool "Use brightnessctl for dimming (recommended)" "${default_use_bctl}")
   if [[ "${use_bctl}" == "true" ]]; then
     local device_default
     device_default="${BRIGHTNESSCTL_DEVICE:-$(detect_brightnessctl_device)}"
-    local device
-    device=$(prompt_string "brightnessctl device name" "${device_default}")
     set_env_var BRIGHTNESSCTL_BIN "\"/usr/bin/brightnessctl\""
-    set_env_var BRIGHTNESSCTL_DEVICE "\"${device}\""
+    set_env_var BRIGHTNESSCTL_DEVICE "\"${device_default}\""
+    set_env_var BACKLIGHT_PATH "\"\""
   else
+    local backlight_default
+    backlight_default="${BACKLIGHT_PATH:-$(detect_backlight_path)}"
+    local backlight_path
+    backlight_path=$(prompt_string "Backlight brightness file" "${backlight_default}")
+    set_env_var BACKLIGHT_PATH "\"${backlight_path}\""
     set_env_var BRIGHTNESSCTL_BIN "\"\""
     set_env_var BRIGHTNESSCTL_DEVICE "\"\""
   fi
@@ -241,12 +267,32 @@ configure_runtime() {
     local vnc_port
     vnc_port=$(prompt_number "VNC TCP port" "${VNC_PORT:-5900}")
     set_env_var VNC_PORT "${vnc_port}"
-    local vnc_password
-    vnc_password=$(prompt_string "VNC password file (blank for none)" "${VNC_PASSWORD_FILE:-}")
-    set_env_var VNC_PASSWORD_FILE "\"${vnc_password}\""
+    local vnc_password_path_default="${VNC_PASSWORD_FILE:-/etc/pi-kiosk/x11vnc.pass}"
+    local vnc_password_path
+    vnc_password_path=$(prompt_string "VNC password file path" "${vnc_password_path_default}")
+    set_env_var VNC_PASSWORD_FILE "\"${vnc_password_path}\""
+    VNC_PASSWORD_FILE="${vnc_password_path}"
+    if [[ "${ASSUME_DEFAULTS}" == "1" ]]; then
+      VNC_PASSWORD_VALUE=""
+    else
+      local first second
+      read -r -s -p "VNC password (leave blank for none): " first
+      echo
+      if [[ -n "${first}" ]]; then
+        read -r -s -p "Confirm password: " second
+        echo
+        if [[ "${first}" != "${second}" ]]; then
+          echo "Passwords do not match; skipping password creation."
+          first=""
+        fi
+      fi
+      VNC_PASSWORD_VALUE="${first}"
+    fi
     local vnc_args
     vnc_args=$(prompt_string "Extra x11vnc arguments" "${VNC_EXTRA_ARGS:--shared -loop}")
     set_env_var VNC_EXTRA_ARGS "\"${vnc_args}\""
+  else
+    VNC_PASSWORD_VALUE=""
   fi
 
   chown "${kiosk_user}:${kiosk_user}" "${CONFIG_FILE}"
@@ -301,6 +347,7 @@ fi
 
 load_existing_config
 configure_runtime
+load_existing_config
 
 log_step "Installing APT dependencies (this may take a minute)"
 apt-get update -qq
@@ -336,6 +383,15 @@ if ! id -u "${KIOSK_USER}" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "${KIOSK_USER}"
 fi
 usermod -aG video,input,render "${KIOSK_USER}"
+
+if [[ "${ENABLE_VNC,,}" == "true" && -n "${VNC_PASSWORD_VALUE}" && -n "${VNC_PASSWORD_FILE:-}" ]]; then
+  log_step "Storing VNC password"
+  install -d "$(dirname "${VNC_PASSWORD_FILE}")"
+  chown "${KIOSK_USER}:${KIOSK_USER}" "$(dirname "${VNC_PASSWORD_FILE}")"
+  sudo -u "${KIOSK_USER}" x11vnc -storepasswd "${VNC_PASSWORD_VALUE}" "${VNC_PASSWORD_FILE}" >/dev/null 2>&1 || {
+    echo "Warning: failed to write VNC password file at ${VNC_PASSWORD_FILE}"
+  }
+fi
 
 log_step "Configuring tty1 autologin"
 mkdir -p /etc/systemd/system/getty@tty1.service.d

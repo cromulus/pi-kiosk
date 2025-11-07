@@ -46,6 +46,8 @@ auto-detects sane defaults for a Raspberry Pi 5 + Pi Display 2 (Debian Trixie),
 but you can accept or override each prompt. Set `PI_KIOSK_ASSUME_DEFAULTS=1`
 when running the script if you need a fully non-interactive run (CI, Ansible,
 etc.)—it will reuse whatever is already in `/etc/pi-kiosk/kiosk.env`.
+If it finds an existing install it asks whether you want to update in place,
+reset (wipe + reinstall), or uninstall.
 
 Maintenance helpers:
 
@@ -88,14 +90,14 @@ simply refresh binaries, the venv, and systemd units.
      something like Loki/Elasticsearch.
    - Disable missing hardware by setting `ENABLE_DISTANCE_SENSOR=false` or
      `ENABLE_LIGHT_SENSOR=false`.
-   - Flip `ENABLE_VNC=true` and optionally set `VNC_PASSWORD_FILE` (created via
-     `sudo -u kiosk x11vnc -storepasswd /etc/pi-kiosk/x11vnc.pass`) if you want
-     remote viewing.
+   - Flip `ENABLE_VNC=true` and supply a password when prompted by the installer
+     (it will store it at `/etc/pi-kiosk/x11vnc.pass`). Leave blank to run VNC
+     without authentication on trusted networks.
    - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
      with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
    - Backlight control defaults to `brightnessctl` targeting the auto-detected
-     device (Pi Display 2 → `backlight/11-0045`). Uncomment `BACKLIGHT_PATH`
-     instead if you prefer to write directly to sysfs.
+     device (Pi Display 2 → `backlight/11-0045`). If you decline `brightnessctl`
+     during install, you will be asked for the exact sysfs brightness path.
    - You normally do not need to touch group membership or Xorg permissions—the
      install script already adds the `kiosk` user to `video,input,render` and
      configures `/etc/X11/Xwrapper.config` with `allowed_users=anybody`.
