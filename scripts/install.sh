@@ -59,7 +59,7 @@ if ! id -u "${KIOSK_USER}" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "${KIOSK_USER}"
 fi
 # ensure kiosk can access GPU/input devices even when systemd launches services
-usermod -aG video,input "${KIOSK_USER}"
+usermod -aG video,input,render "${KIOSK_USER}"
 
 echo "Configuring tty1 autologin for ${KIOSK_USER}..."
 mkdir -p /etc/systemd/system/getty@tty1.service.d
