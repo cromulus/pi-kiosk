@@ -58,6 +58,8 @@ if ! id -u "${KIOSK_USER}" >/dev/null 2>&1; then
   echo "Creating user ${KIOSK_USER}..."
   useradd -m -s /bin/bash "${KIOSK_USER}"
 fi
+# ensure kiosk can access GPU/input devices even when systemd launches services
+usermod -aG video,input "${KIOSK_USER}"
 
 echo "Configuring tty1 autologin for ${KIOSK_USER}..."
 mkdir -p /etc/systemd/system/getty@tty1.service.d
@@ -100,6 +102,21 @@ install -m 644 "${REPO_ROOT}/services/kiosk-vnc.service" \
 systemctl daemon-reload
 systemctl enable --now "kiosk-browser@${KIOSK_USER}.service"
 systemctl enable --now kiosk-sensors.service
+
+# Allow kiosk (and systemd services) to launch Xorg without needing an attached console
+XWRAPPER="/etc/X11/Xwrapper.config"
+if [[ -f "${XWRAPPER}" ]]; then
+  if grep -q '^allowed_users=' "${XWRAPPER}"; then
+    sed -i 's/^allowed_users=.*/allowed_users=anybody/' "${XWRAPPER}"
+  else
+    echo 'allowed_users=anybody' >> "${XWRAPPER}"
+  fi
+else
+  cat <<'EOF' > "${XWRAPPER}"
+allowed_users=anybody
+needs_root_rights=no
+EOF
+fi
 
 ENABLE_VNC="false"
 if [[ -f "${CONFIG_DIR}/kiosk.env" ]]; then

@@ -75,6 +75,9 @@ simply refresh binaries, the venv, and systemd units.
      remote viewing.
    - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
      with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
+   - You normally do not need to touch group membership or Xorg permissions—the
+     install script already adds the `kiosk` user to `video,input` and configures
+     `/etc/X11/Xwrapper.config` with `allowed_users=anybody`.
 4. Customize any sensor thresholds or brightness bounds while you are there.
 5. Reboot (or `sudo systemctl restart kiosk-browser@kiosk kiosk-sensors`).
 
