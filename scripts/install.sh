@@ -11,8 +11,11 @@ APP_DIR="/opt/pi-kiosk"
 CONFIG_DIR="/etc/pi-kiosk"
 CONFIG_FILE="${CONFIG_DIR}/kiosk.env"
 KIOSK_USER_DEFAULT="kiosk"
+KIOSK_USER="${KIOSK_USER_DEFAULT}"
 SYSTEMD_DIR="/etc/systemd/system"
 ASSUME_DEFAULTS="${PI_KIOSK_ASSUME_DEFAULTS:-0}"
+RESET=0
+UNINSTALL=0
 
 APT_PACKAGES=(
   python3
@@ -30,10 +33,40 @@ APT_PACKAGES=(
   x11vnc
 )
 
-step=0
+usage() {
+  cat <<'EOF'
+Usage: sudo ./scripts/install.sh [options]
+
+Options:
+  --assume-defaults        Skip prompts and reuse or accept default values.
+  --reset                  Completely remove existing installation (including config)
+                           and then run a fresh install.
+  --uninstall              Remove services, files, and optional config, then exit.
+  -h, --help               Show this help text.
+
+Environment:
+  PI_KIOSK_ASSUME_DEFAULTS=1   Equivalent to --assume-defaults.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --assume-defaults) ASSUME_DEFAULTS=1 ;;
+    --reset) RESET=1 ;;
+    --uninstall) UNINSTALL=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+  esac
+  shift
+done
+
+if [[ "${UNINSTALL}" == "1" && "${RESET}" == "1" ]]; then
+  echo "Choose either --reset or --uninstall, not both." >&2
+  exit 1
+fi
+
 log_step() {
-  step=$((step + 1))
-  printf '\n[%d/%d] %s\n' "${step}" 8 "$1"
+  printf '\n==> %s\n' "$1"
 }
 
 prompt_string() {
@@ -218,6 +251,47 @@ configure_runtime() {
 
   chown "${kiosk_user}:${kiosk_user}" "${CONFIG_FILE}"
 }
+
+perform_uninstall() {
+  local remove_config="${1:-false}"
+
+  log_step "Stopping kiosk services"
+  systemctl disable --now "kiosk-browser@${KIOSK_USER}.service" >/dev/null 2>&1 || true
+  systemctl disable --now kiosk-sensors.service >/dev/null 2>&1 || true
+  systemctl disable --now kiosk-vnc.service >/dev/null 2>&1 || true
+
+  log_step "Removing deployed files"
+  rm -rf "${APP_DIR}"
+  rm -f /usr/local/bin/launch_kiosk.sh \
+        /usr/local/bin/kiosk_xsession.sh \
+        /usr/local/bin/launch_vnc.sh
+
+  rm -f "${SYSTEMD_DIR}/kiosk-browser@.service" \
+        "${SYSTEMD_DIR}/kiosk-sensors.service" \
+        "${SYSTEMD_DIR}/kiosk-vnc.service"
+
+  rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf 2>/dev/null || true
+  systemctl daemon-reload
+
+  if [[ "${remove_config}" == "true" ]]; then
+    rm -f "${CONFIG_FILE}"
+    rmdir "${CONFIG_DIR}" 2>/dev/null || true
+  fi
+}
+
+if [[ "${UNINSTALL}" == "1" ]]; then
+  load_existing_config
+  local_remove_cfg=$(prompt_bool "Remove ${CONFIG_FILE} during uninstall?" "false")
+  perform_uninstall "${local_remove_cfg}"
+  echo "Pi Kiosk uninstalled."
+  exit 0
+fi
+
+if [[ "${RESET}" == "1" ]]; then
+  load_existing_config
+  local_remove_cfg=$(prompt_bool "Remove existing config before reinstall?" "true")
+  perform_uninstall "${local_remove_cfg}"
+fi
 
 log_step "Preparing configuration file"
 install -d "${CONFIG_DIR}"

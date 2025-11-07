@@ -47,6 +47,16 @@ but you can accept or override each prompt. Set `PI_KIOSK_ASSUME_DEFAULTS=1`
 when running the script if you need a fully non-interactive run (CI, Ansible,
 etc.)—it will reuse whatever is already in `/etc/pi-kiosk/kiosk.env`.
 
+Maintenance helpers:
+
+```bash
+# Remove everything (including config) and reinstall from scratch
+sudo ./scripts/install.sh --reset
+
+# Uninstall services and binaries (keeps config unless you say otherwise)
+sudo ./scripts/install.sh --uninstall
+```
+
 What the script does:
 1. Installs all OS dependencies (Chromium, Xorg, matchbox, Python libs, etc.). It
    automatically picks the correct Chromium package name (`chromium` vs
@@ -83,9 +93,9 @@ simply refresh binaries, the venv, and systemd units.
      remote viewing.
    - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
      with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
-   - Backlight control defaults to writing directly to the detected sysfs node
-     (`/sys/class/backlight/11-0045/brightness` on the Pi Display 2). Only set
-     `BRIGHTNESSCTL_*` if you intentionally want to use `brightnessctl`.
+   - Backlight control defaults to `brightnessctl` targeting the auto-detected
+     device (Pi Display 2 → `backlight/11-0045`). Uncomment `BACKLIGHT_PATH`
+     instead if you prefer to write directly to sysfs.
    - You normally do not need to touch group membership or Xorg permissions—the
      install script already adds the `kiosk` user to `video,input,render` and
      configures `/etc/X11/Xwrapper.config` with `allowed_users=anybody`.
