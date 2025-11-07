@@ -325,6 +325,77 @@ perform_uninstall() {
   fi
 }
 
+run_diagnostics() {
+  log_step "Running diagnostics"
+  local failures=0
+
+  if command -v chromium-browser >/dev/null 2>&1 || command -v chromium >/dev/null 2>&1; then
+    echo "  [OK] Chromium binary detected."
+  else
+    echo "  [FAIL] Chromium binary missing."
+    failures=1
+  fi
+
+  local browser_unit="kiosk-browser@${KIOSK_USER}.service"
+  if systemctl is-active --quiet "${browser_unit}"; then
+    echo "  [OK] ${browser_unit} active."
+  else
+    echo "  [FAIL] ${browser_unit} not active."
+    failures=1
+  fi
+
+  if systemctl is-active --quiet kiosk-sensors.service; then
+    echo "  [OK] kiosk-sensors.service active."
+  else
+    echo "  [FAIL] kiosk-sensors.service not active."
+    failures=1
+  fi
+
+  if [[ "${ENABLE_VNC,,}" == "true" ]]; then
+    if systemctl is-active --quiet kiosk-vnc.service; then
+      echo "  [OK] kiosk-vnc.service active."
+    else
+      echo "  [FAIL] kiosk-vnc.service not active."
+      failures=1
+    fi
+    if [[ -n "${VNC_PASSWORD_FILE:-}" ]]; then
+      if [[ -f "${VNC_PASSWORD_FILE}" ]]; then
+        echo "  [OK] VNC password file present."
+      else
+        echo "  [WARN] VNC password file missing at ${VNC_PASSWORD_FILE}."
+      fi
+    fi
+  fi
+
+  if [[ "${ENABLE_DISTANCE_SENSOR,,}" == "true" || "${ENABLE_LIGHT_SENSOR,,}" == "true" ]]; then
+    if [[ -e /dev/i2c-1 ]]; then
+      echo "  [OK] /dev/i2c-1 detected."
+    else
+      echo "  [WARN] /dev/i2c-1 missing (sensors may not work)."
+    fi
+  fi
+
+  if [[ -n "${BRIGHTNESSCTL_BIN:-}" ]]; then
+    if [[ -x "${BRIGHTNESSCTL_BIN}" ]]; then
+      echo "  [OK] brightnessctl available."
+    else
+      echo "  [WARN] BRIGHTNESSCTL_BIN points to missing binary (${BRIGHTNESSCTL_BIN})."
+    fi
+  elif [[ -n "${BACKLIGHT_PATH:-}" ]]; then
+    if [[ -w "${BACKLIGHT_PATH}" ]]; then
+      echo "  [OK] Backlight path ${BACKLIGHT_PATH} writeable."
+    else
+      echo "  [WARN] Cannot write to ${BACKLIGHT_PATH}."
+    fi
+  fi
+
+  if [[ "${failures}" -eq 0 ]]; then
+    echo "Diagnostics completed with no critical issues."
+  else
+    echo "Diagnostics found problems (see above)."
+  fi
+}
+
 if [[ "${UNINSTALL}" == "1" ]]; then
   load_existing_config
   local_remove_cfg=$(prompt_bool "Remove ${CONFIG_FILE} during uninstall?" "false")
@@ -450,6 +521,8 @@ if [[ "${ENABLE_VNC,,}" == "true" ]]; then
 else
   systemctl disable --now kiosk-vnc.service >/dev/null 2>&1 || true
 fi
+
+run_diagnostics
 
 printf '\nAll done! You can rerun this script anytime; it will reuse your saved answers.\n'
 printf 'Review %s if you need to tweak anything.\n' "${CONFIG_FILE}"
