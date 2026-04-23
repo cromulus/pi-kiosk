@@ -13,6 +13,7 @@ CONFIG_FILE="${CONFIG_DIR}/kiosk.env"
 KIOSK_USER_DEFAULT="kiosk"
 KIOSK_USER="${KIOSK_USER_DEFAULT}"
 SYSTEMD_DIR="/etc/systemd/system"
+AVAHI_SERVICE_DIR="/etc/avahi/services"
 ASSUME_DEFAULTS="${PI_KIOSK_ASSUME_DEFAULTS:-0}"
 RESET=0
 UNINSTALL=0
@@ -33,6 +34,8 @@ APT_PACKAGES=(
   unclutter
   brightnessctl
   x11vnc
+  avahi-daemon
+  avahi-utils
 )
 
 usage() {
@@ -176,6 +179,16 @@ normalize_brightnessctl_device() {
   printf '%s' "${device#backlight/}"
 }
 
+xml_escape() {
+  local value="$1"
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  value="${value//\"/&quot;}"
+  value="${value//\'/&apos;}"
+  printf '%s' "${value}"
+}
+
 set_env_var() {
   local key="$1"
   local value="$2"
@@ -183,6 +196,13 @@ set_env_var() {
     sed -i "s|^${key}=.*|${key}=${value}|" "${CONFIG_FILE}"
   else
     printf '%s=%s\n' "${key}" "${value}" >>"${CONFIG_FILE}"
+  fi
+}
+
+remove_env_var() {
+  local key="$1"
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    sed -i "/^${key}=.*/d" "${CONFIG_FILE}"
   fi
 }
 
@@ -209,15 +229,11 @@ configure_runtime() {
   ha_url=$(prompt_string "Home Assistant base URL" "${default_ha_url}")
   set_env_var HA_BASE_URL "\"${ha_url}\""
 
-  local default_token="${HA_LONG_LIVED_TOKEN:-}"
-  local token
-  token=$(prompt_string "HA long-lived token (leave blank to skip)" "${default_token}")
-  set_env_var HA_LONG_LIVED_TOKEN "\"${token}\""
-
   local default_query="${HA_EXTRA_QUERY:-kiosk=true}"
   local query
   query=$(prompt_string "Extra query string (kiosk flags)" "${default_query}")
   set_env_var HA_EXTRA_QUERY "\"${query}\""
+  remove_env_var HA_LONG_LIVED_TOKEN
 
   local i2c_present="false"
   [[ -e /dev/i2c-1 ]] && i2c_present="true"
@@ -301,6 +317,61 @@ configure_runtime() {
     VNC_PASSWORD_VALUE=""
   fi
 
+  local enable_mdns
+  local default_mdns="${ENABLE_MDNS:-true}"
+  enable_mdns=$(prompt_bool "Enable mDNS/Bonjour discovery" "${default_mdns}")
+  set_env_var ENABLE_MDNS "${enable_mdns}"
+  if [[ "${enable_mdns}" == "true" ]]; then
+    local mdns_name
+    mdns_name=$(prompt_string "mDNS service name" "${MDNS_NAME:-Pi Kiosk}")
+    set_env_var MDNS_NAME "\"${mdns_name}\""
+
+    local advertise_ssh advertise_vnc
+    advertise_ssh=$(prompt_bool "Advertise SSH via mDNS" "${MDNS_ADVERTISE_SSH:-true}")
+    advertise_vnc=$(prompt_bool "Advertise VNC via mDNS" "${MDNS_ADVERTISE_VNC:-true}")
+    set_env_var MDNS_ADVERTISE_SSH "${advertise_ssh}"
+    set_env_var MDNS_ADVERTISE_VNC "${advertise_vnc}"
+  fi
+}
+
+install_mdns_services() {
+  local enable_mdns="${ENABLE_MDNS:-true}"
+  local advertise_ssh="${MDNS_ADVERTISE_SSH:-true}"
+  local advertise_vnc="${MDNS_ADVERTISE_VNC:-true}"
+  local mdns_name="${MDNS_NAME:-Pi Kiosk}"
+  local escaped_name
+  escaped_name="$(xml_escape "${mdns_name}")"
+
+  install -d "${AVAHI_SERVICE_DIR}"
+
+  if [[ "${enable_mdns,,}" != "true" ]]; then
+    rm -f "${AVAHI_SERVICE_DIR}/pi-kiosk-ssh.service" \
+          "${AVAHI_SERVICE_DIR}/pi-kiosk-vnc.service"
+    return
+  fi
+
+  systemctl enable --now avahi-daemon >/dev/null 2>&1 || true
+
+  if [[ "${advertise_ssh,,}" == "true" ]]; then
+    sed -e "s|__MDNS_NAME__|${escaped_name}|g" \
+      "${REPO_ROOT}/avahi/pi-kiosk-ssh.service" \
+      >"${AVAHI_SERVICE_DIR}/pi-kiosk-ssh.service"
+    chmod 644 "${AVAHI_SERVICE_DIR}/pi-kiosk-ssh.service"
+  else
+    rm -f "${AVAHI_SERVICE_DIR}/pi-kiosk-ssh.service"
+  fi
+
+  if [[ "${ENABLE_VNC,,}" == "true" && "${advertise_vnc,,}" == "true" ]]; then
+    sed -e "s|__MDNS_NAME__|${escaped_name}|g" \
+        -e "s|__VNC_PORT__|${VNC_PORT:-5900}|g" \
+      "${REPO_ROOT}/avahi/pi-kiosk-vnc.service" \
+      >"${AVAHI_SERVICE_DIR}/pi-kiosk-vnc.service"
+    chmod 644 "${AVAHI_SERVICE_DIR}/pi-kiosk-vnc.service"
+  else
+    rm -f "${AVAHI_SERVICE_DIR}/pi-kiosk-vnc.service"
+  fi
+
+  systemctl reload-or-restart avahi-daemon >/dev/null 2>&1 || true
 }
 
 perform_uninstall() {
@@ -320,9 +391,12 @@ perform_uninstall() {
   rm -f "${SYSTEMD_DIR}/kiosk-browser@.service" \
         "${SYSTEMD_DIR}/kiosk-sensors.service" \
         "${SYSTEMD_DIR}/kiosk-vnc.service"
+  rm -f "${AVAHI_SERVICE_DIR}/pi-kiosk-ssh.service" \
+        "${AVAHI_SERVICE_DIR}/pi-kiosk-vnc.service"
 
   rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf 2>/dev/null || true
   systemctl daemon-reload
+  systemctl reload-or-restart avahi-daemon >/dev/null 2>&1 || true
 
   if [[ "${remove_config}" == "true" ]]; then
     rm -f "${CONFIG_FILE}"
@@ -404,6 +478,31 @@ run_diagnostics() {
     fi
   fi
 
+  if [[ "${ENABLE_MDNS,,}" == "true" ]]; then
+    if systemctl is-active --quiet avahi-daemon; then
+      echo "  [OK] avahi-daemon active."
+    else
+      echo "  [FAIL] avahi-daemon not active."
+      failures=1
+    fi
+    if [[ "${MDNS_ADVERTISE_SSH:-true}" == "true" ]]; then
+      if [[ -f "${AVAHI_SERVICE_DIR}/pi-kiosk-ssh.service" ]]; then
+        echo "  [OK] SSH mDNS advertisement installed."
+      else
+        echo "  [FAIL] SSH mDNS advertisement missing."
+        failures=1
+      fi
+    fi
+    if [[ "${ENABLE_VNC,,}" == "true" && "${MDNS_ADVERTISE_VNC:-true}" == "true" ]]; then
+      if [[ -f "${AVAHI_SERVICE_DIR}/pi-kiosk-vnc.service" ]]; then
+        echo "  [OK] VNC mDNS advertisement installed."
+      else
+        echo "  [FAIL] VNC mDNS advertisement missing."
+        failures=1
+      fi
+    fi
+  fi
+
   if [[ "${failures}" -eq 0 ]]; then
     echo "Diagnostics completed with no critical issues."
   else
@@ -463,6 +562,9 @@ if command -v raspi-config >/dev/null 2>&1; then
   log_step "Enabling I²C bus via raspi-config"
   raspi-config nonint do_i2c 0 || true
 fi
+
+log_step "Configuring mDNS discovery"
+install_mdns_services
 
 log_step "Creating/refreshing kiosk user (${KIOSK_USER})"
 if ! id -u "${KIOSK_USER}" >/dev/null 2>&1; then

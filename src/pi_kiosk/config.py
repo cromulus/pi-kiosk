@@ -29,9 +29,6 @@ class KioskConfig(BaseModel):
     ha_extra_query: str = Field(
         default="", validation_alias="HA_EXTRA_QUERY", description="Query string additions appended to the HA URL."
     )
-    ha_long_lived_token: str | None = Field(
-        default=None, validation_alias="HA_LONG_LIVED_TOKEN"
-    )
 
     distance_threshold_mm: int = Field(
         default=1500, validation_alias="DISTANCE_THRESHOLD_MM", ge=100, le=5000

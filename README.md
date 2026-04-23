@@ -7,7 +7,7 @@ script re-applies everything, so the Pi can stay locked down and reproducible.
 
 ## What you get
 - Chromium launches in kiosk mode on boot and loads your HA dashboard using a
-  dedicated long-lived token.
+  persistent browser profile for the dedicated kiosk user.
 - Sensor daemon drives screen wake/sleep plus brightness (Adafruit VL53L4CX +
   VEML7700). The new modular controller keeps track of sensor health, retries with
   backoff, and falls back to safe defaults when hardware is missing.
@@ -76,11 +76,12 @@ simply refresh binaries, the venv, and systemd units.
 ## Configure Home Assistant access
 1. Create a dedicated HA user (e.g., `kiosk`) with the minimum Lovelace access
    you need.
-2. Generate a Long-Lived Access Token for that user.
+2. Log in once through the kiosk browser over VNC or with a local keyboard. The
+   Chromium profile is persistent, so future restarts reuse the Home Assistant
+   frontend session.
 3. Edit `/etc/pi-kiosk/kiosk.env` (created from `config/kiosk.env.sample` and
    auto-tuned by the installer):
    - Set `HA_BASE_URL` to the dashboard URL you want to load.
-   - Paste the token into `HA_LONG_LIVED_TOKEN`.
    - Optional: add `HA_EXTRA_QUERY="kiosk=true"` if you use the kiosk-mode
      frontend plugin.
    - Adjust the typed knobs (`DISTANCE_THRESHOLD_MM`, `BRIGHTNESS_MIN/MAX`,
@@ -93,6 +94,9 @@ simply refresh binaries, the venv, and systemd units.
    - Flip `ENABLE_VNC=true` and supply a password when prompted by the installer
      (it will store it at `/etc/pi-kiosk/x11vnc.pass`). Leave blank to run VNC
      without authentication on trusted networks.
+   - Leave `ENABLE_MDNS=true` to publish the Pi on the local network as
+     `<hostname>.local` and advertise SSH (`_ssh._tcp`) plus VNC (`_rfb._tcp`)
+     when enabled.
    - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
      with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
    - Backlight control defaults to `brightnessctl` targeting the auto-detected
@@ -119,6 +123,9 @@ simply refresh binaries, the venv, and systemd units.
 - `kiosk-vnc.service`  
   (Optional) Runs x11vnc bound to the kiosk X session. Enable it by setting
   `ENABLE_VNC=true` in the config and rerunning the installer.
+- mDNS/Bonjour discovery
+  When `ENABLE_MDNS=true`, Avahi publishes the host as `<hostname>.local`.
+  The installer also advertises SSH and, when VNC is enabled, the VNC mirror.
 
 Both services default to the `kiosk` user and restart automatically if they
 crash. Journald captures logs (`journalctl -u kiosk-sensors.service`).
@@ -130,11 +137,12 @@ crash. Journald captures logs (`journalctl -u kiosk-sensors.service`).
 - Remote viewing: VNC is disabled by default. When enabled, it respects the port
   and password file you configure; leave the password blank only on trusted
   networks.
+- Discovery: mDNS is enabled by default so the kiosk can be reached by hostname
+  on local networks that support Bonjour/Avahi. Disable with `ENABLE_MDNS=false`.
 - Missing brightness utility: you can point `BACKLIGHT_PATH` to
   `/sys/class/backlight/.../brightness` if `brightnessctl` is not viable.
-- Chromium token safety: the URL is constructed runtime so the token never lives
-  in plaintext files under your home directory; it only exists in
-  `/etc/pi-kiosk/kiosk.env` (root-owned). Restrict that file accordingly.
+- Home Assistant authentication: long-lived access tokens are for API access,
+  not frontend login. Let Chromium keep the kiosk user's browser session instead.
 
 ## Development flow
 - Modify files locally → `git commit` → `git push`.

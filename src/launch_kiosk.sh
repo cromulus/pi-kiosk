@@ -15,21 +15,7 @@ fi
 : "${HA_BASE_URL:?Set HA_BASE_URL in /etc/pi-kiosk/kiosk.env}"
 
 HA_EXTRA_QUERY="${HA_EXTRA_QUERY:-}"
-HA_LONG_LIVED_TOKEN="${HA_LONG_LIVED_TOKEN:-}"
 KIOSK_VT="${KIOSK_VT:-7}"
-
-urlencode() {
-  local string="${1}"
-  local length="${#string}"
-  local i char
-  for ((i = 0; i < length; i++)); do
-    char="${string:i:1}"
-    case "${char}" in
-      [a-zA-Z0-9.~_-]) printf '%s' "${char}" ;;
-      *) printf '%%%02X' "'${char}" ;;
-    esac
-  done
-}
 
 append_query() {
   local base="${1}"
@@ -45,9 +31,6 @@ append_query() {
 
 build_url() {
   local url="${HA_BASE_URL}"
-  if [[ -n "${HA_LONG_LIVED_TOKEN}" ]]; then
-    url="$(append_query "${url}" "authToken=$(urlencode "${HA_LONG_LIVED_TOKEN}")")"
-  fi
   if [[ -n "${HA_EXTRA_QUERY}" ]]; then
     url="$(append_query "${url}" "${HA_EXTRA_QUERY}")"
   fi
