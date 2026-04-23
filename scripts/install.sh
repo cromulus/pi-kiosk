@@ -224,7 +224,7 @@ configure_runtime() {
   set_env_var KIOSK_USER "\"${kiosk_user}\""
   KIOSK_USER="${kiosk_user}"
 
-  local default_ha_url="${HA_BASE_URL:-https://homeassistant.local:8123/lovelace/kiosk}"
+  local default_ha_url="${HA_BASE_URL:-https://homeassistant.local:8123/kiosk}"
   local ha_url
   ha_url=$(prompt_string "Home Assistant base URL" "${default_ha_url}")
   set_env_var HA_BASE_URL "\"${ha_url}\""
@@ -624,25 +624,12 @@ EOF
 install -d -m 1777 -o root -g root /tmp/.X11-unix
 
 systemctl daemon-reload
-if systemctl is-enabled "kiosk-browser@${KIOSK_USER}.service" >/dev/null 2>&1; then
-  systemctl restart "kiosk-browser@${KIOSK_USER}.service"
-else
-  systemctl enable --now "kiosk-browser@${KIOSK_USER}.service"
-fi
-
-if systemctl is-enabled kiosk-sensors.service >/dev/null 2>&1; then
-  systemctl restart kiosk-sensors.service
-else
-  systemctl enable --now kiosk-sensors.service
-fi
+systemctl reenable --now "kiosk-browser@${KIOSK_USER}.service"
+systemctl reenable --now kiosk-sensors.service
 
 load_existing_config
 if [[ "${ENABLE_VNC,,}" == "true" ]]; then
-  if systemctl is-enabled kiosk-vnc.service >/dev/null 2>&1; then
-    systemctl restart kiosk-vnc.service
-  else
-    systemctl enable --now kiosk-vnc.service
-  fi
+  systemctl reenable --now kiosk-vnc.service
 else
   systemctl disable --now kiosk-vnc.service >/dev/null 2>&1 || true
 fi

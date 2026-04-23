@@ -81,7 +81,11 @@ simply refresh binaries, the venv, and systemd units.
    frontend session.
 3. Edit `/etc/pi-kiosk/kiosk.env` (created from `config/kiosk.env.sample` and
    auto-tuned by the installer):
-   - Set `HA_BASE_URL` to the dashboard URL you want to load.
+   - Set `HA_BASE_URL` to the exact dashboard/view URL you want to load from
+     Home Assistant's address bar.
+   - Use `/lovelace/...` only for views on the default dashboard. For a separate
+     dashboard with URL path `kiosk`, use `https://your-ha-host/kiosk` or one of
+     that dashboard's view URLs instead of `https://your-ha-host/lovelace/kiosk`.
    - Optional: add `HA_EXTRA_QUERY="kiosk=true"` if you use the kiosk-mode
      frontend plugin.
    - Adjust the typed knobs (`DISTANCE_THRESHOLD_MM`, `BRIGHTNESS_MIN/MAX`,

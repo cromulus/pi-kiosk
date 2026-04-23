@@ -38,6 +38,7 @@ DEFAULT_FLAGS=(
   --noerrdialogs
   --disable-session-crashed-bubble
   --check-for-update-interval=604800
+  --disable-pinch
   --disable-translate
   --overscroll-history-navigation=0
   --disable-features=TranslateUI
@@ -59,7 +60,9 @@ if command -v matchbox-window-manager >/dev/null 2>&1; then
 fi
 
 if command -v unclutter >/dev/null 2>&1; then
-  unclutter -idle 1 -root &
+  # Hide the pointer immediately and use pointer grabbing so Chromium/VNC do
+  # not keep it visible indefinitely.
+  unclutter -idle 0 -root -grab -reset &
 fi
 
 exec "${CHROMIUM_BIN}" "${DEFAULT_FLAGS[@]}" "${EXTRA_FLAGS[@]}" "${KIOSK_URL}"
