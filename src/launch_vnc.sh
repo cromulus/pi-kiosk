@@ -22,8 +22,10 @@ ARGS=(
 )
 
 if [[ -n "${PASSWORD_FILE}" ]]; then
-  if [[ -f "${PASSWORD_FILE}" ]]; then
+  if [[ -r "${PASSWORD_FILE}" ]]; then
     ARGS+=(-rfbauth "${PASSWORD_FILE}")
+  elif [[ -f "${PASSWORD_FILE}" ]]; then
+    echo "Warning: VNC password file ${PASSWORD_FILE} is not readable; starting without authentication" >&2
   else
     echo "Warning: VNC password file ${PASSWORD_FILE} not found; starting without authentication" >&2
   fi

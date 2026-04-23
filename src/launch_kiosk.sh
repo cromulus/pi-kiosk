@@ -67,5 +67,5 @@ if [[ -n "${XAUTHORITY:-}" && ! -f "${XAUTHORITY}" ]]; then
   chmod 600 "${XAUTHORITY}" || true
 fi
 
-echo "Starting kiosk on ${DISPLAY} (URL: ${KIOSK_URL})"
+echo "Starting kiosk on ${DISPLAY}"
 exec startx "${KIOSK_XSESSION}" -- "${DISPLAY}" "vt${KIOSK_VT}" -nolisten tcp

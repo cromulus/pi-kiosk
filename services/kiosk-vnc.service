@@ -1,6 +1,6 @@
 [Unit]
 Description=VNC mirror of the kiosk display
-After=graphical.target kiosk-browser@kiosk.service
+After=kiosk-browser@kiosk.service
 Wants=kiosk-browser@kiosk.service
 ConditionPathExists=/usr/bin/x11vnc
 
@@ -16,4 +16,4 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target

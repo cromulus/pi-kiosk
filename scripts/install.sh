@@ -165,10 +165,15 @@ detect_brightnessctl_device() {
     [[ -d "${candidate}" ]] || continue
     local name
     name=$(basename "${candidate}")
-    echo "backlight/${name}"
+    echo "${name}"
     return
   done
-  echo "backlight/11-0045"
+  echo "11-0045"
+}
+
+normalize_brightnessctl_device() {
+  local device="$1"
+  printf '%s' "${device#backlight/}"
 }
 
 set_env_var() {
@@ -246,6 +251,7 @@ configure_runtime() {
   if [[ "${use_bctl}" == "true" ]]; then
     local device_default
     device_default="${BRIGHTNESSCTL_DEVICE:-$(detect_brightnessctl_device)}"
+    device_default="$(normalize_brightnessctl_device "${device_default}")"
     set_env_var BRIGHTNESSCTL_BIN "\"/usr/bin/brightnessctl\""
     set_env_var BRIGHTNESSCTL_DEVICE "\"${device_default}\""
     set_env_var BACKLIGHT_PATH "\"\""
@@ -295,7 +301,6 @@ configure_runtime() {
     VNC_PASSWORD_VALUE=""
   fi
 
-  chown "${kiosk_user}:${kiosk_user}" "${CONFIG_FILE}"
 }
 
 perform_uninstall() {
@@ -378,6 +383,16 @@ run_diagnostics() {
   if [[ -n "${BRIGHTNESSCTL_BIN:-}" ]]; then
     if [[ -x "${BRIGHTNESSCTL_BIN}" ]]; then
       echo "  [OK] brightnessctl available."
+      local bctl_args=("${BRIGHTNESSCTL_BIN}")
+      if [[ -n "${BRIGHTNESSCTL_DEVICE:-}" ]]; then
+        bctl_args+=("--device=${BRIGHTNESSCTL_DEVICE}")
+      fi
+      if "${bctl_args[@]}" info >/dev/null 2>&1; then
+        echo "  [OK] brightnessctl device usable."
+      else
+        echo "  [FAIL] brightnessctl cannot use configured device (${BRIGHTNESSCTL_DEVICE:-default})."
+        failures=1
+      fi
     else
       echo "  [WARN] BRIGHTNESSCTL_BIN points to missing binary (${BRIGHTNESSCTL_BIN})."
     fi
@@ -454,14 +469,21 @@ if ! id -u "${KIOSK_USER}" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "${KIOSK_USER}"
 fi
 usermod -aG video,input,render "${KIOSK_USER}"
+KIOSK_GROUP="$(id -gn "${KIOSK_USER}")"
+chown "root:${KIOSK_GROUP}" "${CONFIG_FILE}"
+chmod 640 "${CONFIG_FILE}"
 
 if [[ "${ENABLE_VNC,,}" == "true" && -n "${VNC_PASSWORD_VALUE}" && -n "${VNC_PASSWORD_FILE:-}" ]]; then
   log_step "Storing VNC password"
   install -d "$(dirname "${VNC_PASSWORD_FILE}")"
-  chown "${KIOSK_USER}:${KIOSK_USER}" "$(dirname "${VNC_PASSWORD_FILE}")"
+  chown "root:${KIOSK_GROUP}" "$(dirname "${VNC_PASSWORD_FILE}")"
   sudo -u "${KIOSK_USER}" x11vnc -storepasswd "${VNC_PASSWORD_VALUE}" "${VNC_PASSWORD_FILE}" >/dev/null 2>&1 || {
     echo "Warning: failed to write VNC password file at ${VNC_PASSWORD_FILE}"
   }
+fi
+if [[ "${ENABLE_VNC,,}" == "true" && -n "${VNC_PASSWORD_FILE:-}" && -f "${VNC_PASSWORD_FILE}" ]]; then
+  chown "${KIOSK_USER}:${KIOSK_GROUP}" "${VNC_PASSWORD_FILE}"
+  chmod 600 "${VNC_PASSWORD_FILE}"
 fi
 
 log_step "Configuring tty1 autologin"
@@ -492,6 +514,13 @@ install -m 644 "${REPO_ROOT}/services/kiosk-sensors.service" \
 install -m 644 "${REPO_ROOT}/services/kiosk-vnc.service" \
   "${SYSTEMD_DIR}/kiosk-vnc.service"
 
+XWRAPPER="/etc/X11/Xwrapper.config"
+cat <<'EOF' >"${XWRAPPER}"
+allowed_users=anybody
+needs_root_rights=yes
+EOF
+install -d -m 1777 -o root -g root /tmp/.X11-unix
+
 systemctl daemon-reload
 if systemctl is-enabled "kiosk-browser@${KIOSK_USER}.service" >/dev/null 2>&1; then
   systemctl restart "kiosk-browser@${KIOSK_USER}.service"
@@ -504,12 +533,6 @@ if systemctl is-enabled kiosk-sensors.service >/dev/null 2>&1; then
 else
   systemctl enable --now kiosk-sensors.service
 fi
-
-XWRAPPER="/etc/X11/Xwrapper.config"
-cat <<'EOF' >"${XWRAPPER}"
-allowed_users=anybody
-needs_root_rights=no
-EOF
 
 load_existing_config
 if [[ "${ENABLE_VNC,,}" == "true" ]]; then

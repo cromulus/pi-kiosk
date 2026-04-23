@@ -8,9 +8,10 @@ Type=simple
 User=%i
 EnvironmentFile=/etc/pi-kiosk/kiosk.env
 WorkingDirectory=/home/%i
+ExecStartPre=+/usr/bin/install -d -m 1777 -o root -g root /tmp/.X11-unix
 ExecStart=/usr/local/bin/launch_kiosk.sh
 Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
