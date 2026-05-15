@@ -103,6 +103,9 @@ simply refresh binaries, the venv, and systemd units.
      when enabled.
    - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
      with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
+   - Set `CHROMIUM_COLOR_SCHEME=schedule` to flip Chromium between light and dark
+     mode by time of day; tune `CHROMIUM_LIGHT_START` and
+     `CHROMIUM_DARK_START` as needed.
    - Backlight control defaults to `brightnessctl` targeting the auto-detected
      device (Pi Display 2 → `11-0045`). If you decline `brightnessctl`
      during install, you will be asked for the exact sysfs brightness path.
