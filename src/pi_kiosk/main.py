@@ -7,6 +7,7 @@ import time
 from typing import Optional
 
 from .config import ConfigError, KioskConfig, load_config
+from .daylight import is_dark
 from .display import ScreenController
 from .logging_utils import setup_logging
 from .sensors import SensorSuite
@@ -68,7 +69,8 @@ def run(argv: Optional[list[str]] = None) -> None:
         if distance_capable and (now - last_motion_ts) > config.inactivity_timeout_sec:
             screen.sleep_screen()
 
-        brightness = screen.brightness_from_lux(readings.ambient_lux)
+        dark_mode = is_dark(config)
+        brightness = screen.brightness_from_lux(readings.ambient_lux, dark_mode=dark_mode)
         screen.set_brightness(brightness)
 
         if readings.ambient_lux is not None:

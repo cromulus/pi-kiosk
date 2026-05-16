@@ -10,8 +10,8 @@ fi
 export DISPLAY="${DISPLAY:-:0}"
 
 CHROMIUM_COLOR_SCHEME="${CHROMIUM_COLOR_SCHEME:-auto}"
-CHROMIUM_LIGHT_START="${CHROMIUM_LIGHT_START:-07:00}"
-CHROMIUM_DARK_START="${CHROMIUM_DARK_START:-19:00}"
+PI_KIOSK_CONFIG="${PI_KIOSK_CONFIG:-/etc/pi-kiosk/kiosk.env}"
+PI_KIOSK_PYTHON="${PI_KIOSK_PYTHON:-/opt/pi-kiosk/venv/bin/python3}"
 
 if [[ -n "${CHROMIUM_BIN:-}" ]]; then
   CANDIDATES=("${CHROMIUM_BIN}")
@@ -54,52 +54,21 @@ if [[ -n "${CHROMIUM_FLAGS:-}" ]]; then
   EXTRA_FLAGS=(${CHROMIUM_FLAGS})
 fi
 
-parse_hhmm_to_seconds() {
-  local value="${1}"
-  if [[ ! "${value}" =~ ^([0-1][0-9]|2[0-3]):([0-5][0-9])$ ]]; then
-    echo "Invalid time value ${value}; expected HH:MM in 24-hour time." >&2
-    exit 1
-  fi
-  local hour="${value%%:*}"
-  local minute="${value##*:}"
-  printf '%d' "$((10#${hour} * 3600 + 10#${minute} * 60))"
-}
-
 is_dark_mode_now() {
-  local light_start_sec dark_start_sec now_sec
-  light_start_sec="$(parse_hhmm_to_seconds "${CHROMIUM_LIGHT_START}")"
-  dark_start_sec="$(parse_hhmm_to_seconds "${CHROMIUM_DARK_START}")"
-  now_sec="$((10#$(date +%H) * 3600 + 10#$(date +%M) * 60 + 10#$(date +%S)))"
-
-  if (( dark_start_sec == light_start_sec )); then
-    return 1
-  fi
-
-  if (( dark_start_sec > light_start_sec )); then
-    (( now_sec >= dark_start_sec || now_sec < light_start_sec ))
+  if [[ -x "${PI_KIOSK_PYTHON}" ]]; then
+    "${PI_KIOSK_PYTHON}" -m pi_kiosk.daylight is-dark --config "${PI_KIOSK_CONFIG}"
     return
   fi
-
-  (( now_sec >= dark_start_sec && now_sec < light_start_sec ))
+  return 1
 }
 
 seconds_until_next_theme_transition() {
-  local light_start_sec dark_start_sec now_sec target_sec
-  light_start_sec="$(parse_hhmm_to_seconds "${CHROMIUM_LIGHT_START}")"
-  dark_start_sec="$(parse_hhmm_to_seconds "${CHROMIUM_DARK_START}")"
-  now_sec="$((10#$(date +%H) * 3600 + 10#$(date +%M) * 60 + 10#$(date +%S)))"
-
-  if is_dark_mode_now; then
-    target_sec="${light_start_sec}"
-  else
-    target_sec="${dark_start_sec}"
+  if [[ -x "${PI_KIOSK_PYTHON}" ]]; then
+    "${PI_KIOSK_PYTHON}" -m pi_kiosk.daylight seconds-until-transition --config "${PI_KIOSK_CONFIG}" \
+      || printf '3600'
+    return
   fi
-
-  if (( target_sec <= now_sec )); then
-    target_sec="$((target_sec + 86400))"
-  fi
-
-  printf '%d' "$((target_sec - now_sec + 1))"
+  printf '3600'
 }
 
 schedule_theme_restart() {

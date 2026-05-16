@@ -86,8 +86,10 @@ simply refresh binaries, the venv, and systemd units.
    - Use `/lovelace/...` only for views on the default dashboard. For a separate
      dashboard with URL path `kiosk`, use `https://your-ha-host/kiosk` or one of
      that dashboard's view URLs instead of `https://your-ha-host/lovelace/kiosk`.
-   - Optional: add `HA_EXTRA_QUERY="kiosk=true"` if you use the kiosk-mode
-     frontend plugin.
+   - Optional: add `HA_EXTRA_QUERY="kiosk=true&auto_reload=true&browser_id=pidisplay"`
+     if you use the kiosk-mode UI and kiosk-auto-reload frontend plugins.
+     `auto_reload=true` reloads the kiosk a few seconds after dashboard edits;
+     use `auto_reload=immediate` if you want no delay.
    - Adjust the typed knobs (`DISTANCE_THRESHOLD_MM`, `BRIGHTNESS_MIN/MAX`,
      `POLL_INTERVAL_SEC`, etc.). The controller validates these at startup so
      misconfigurations fail fast.
@@ -104,8 +106,13 @@ simply refresh binaries, the venv, and systemd units.
    - Chromium is auto-detected (`chromium-browser`, `chromium`, or snap). Override
      with `CHROMIUM_BIN=/custom/path` if you use a non-standard build.
    - Set `CHROMIUM_COLOR_SCHEME=schedule` to flip Chromium between light and dark
-     mode by time of day; tune `CHROMIUM_LIGHT_START` and
-     `CHROMIUM_DARK_START` as needed.
+     mode by the shared day/night schedule. Use `DAYLIGHT_SCHEDULE=fixed` with
+     `DAYLIGHT_LIGHT_START`/`DAYLIGHT_DARK_START`, or set
+     `DAYLIGHT_SCHEDULE=sun` plus `DAYLIGHT_LATITUDE`/`DAYLIGHT_LONGITUDE` for
+     sunrise/sunset.
+   - Set `BRIGHTNESS_SCHEDULE=true` to apply `DAY_BRIGHTNESS` during the light
+     window and `NIGHT_BRIGHTNESS` during the dark window. This works even when
+     the ambient light sensor is disabled.
    - Backlight control defaults to `brightnessctl` targeting the auto-detected
      device (Pi Display 2 → `11-0045`). If you decline `brightnessctl`
      during install, you will be asked for the exact sysfs brightness path.

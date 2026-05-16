@@ -52,6 +52,38 @@ class KioskConfig(BaseModel):
     default_brightness: int = Field(
         default=120, validation_alias="DEFAULT_BRIGHTNESS", ge=0, le=255
     )
+    brightness_schedule: bool = Field(
+        default=False, validation_alias="BRIGHTNESS_SCHEDULE"
+    )
+    day_brightness: int = Field(
+        default=120, validation_alias="DAY_BRIGHTNESS", ge=0, le=255
+    )
+    night_brightness: int = Field(
+        default=35, validation_alias="NIGHT_BRIGHTNESS", ge=0, le=255
+    )
+
+    daylight_schedule: str = Field(default="fixed", validation_alias="DAYLIGHT_SCHEDULE")
+    daylight_light_start: str = Field(
+        default="07:00", validation_alias="DAYLIGHT_LIGHT_START"
+    )
+    daylight_dark_start: str = Field(
+        default="19:00", validation_alias="DAYLIGHT_DARK_START"
+    )
+    daylight_timezone: str | None = Field(
+        default=None, validation_alias="DAYLIGHT_TIMEZONE"
+    )
+    daylight_latitude: float | None = Field(
+        default=None, validation_alias="DAYLIGHT_LATITUDE", ge=-90.0, le=90.0
+    )
+    daylight_longitude: float | None = Field(
+        default=None, validation_alias="DAYLIGHT_LONGITUDE", ge=-180.0, le=180.0
+    )
+    daylight_sunrise_offset_min: int = Field(
+        default=0, validation_alias="DAYLIGHT_SUNRISE_OFFSET_MIN", ge=-360, le=360
+    )
+    daylight_sunset_offset_min: int = Field(
+        default=0, validation_alias="DAYLIGHT_SUNSET_OFFSET_MIN", ge=-360, le=360
+    )
 
     brightnessctl_bin: str = Field(
         default="/usr/bin/brightnessctl", validation_alias="BRIGHTNESSCTL_BIN"
@@ -106,6 +138,30 @@ class KioskConfig(BaseModel):
                 f"LOG_LEVEL must be one of {', '.join(sorted(allowed))}, got {value!r}"
             )
         return upper
+
+    @field_validator("daylight_schedule")
+    @classmethod
+    def _validate_daylight_schedule(cls, value: str) -> str:
+        allowed = {"fixed", "sun"}
+        normalized = value.lower()
+        if normalized not in allowed:
+            raise ValueError(
+                f"DAYLIGHT_SCHEDULE must be one of {', '.join(sorted(allowed))}, got {value!r}"
+            )
+        return normalized
+
+    @field_validator("daylight_light_start", "daylight_dark_start")
+    @classmethod
+    def _validate_hhmm(cls, value: str) -> str:
+        try:
+            hour_raw, minute_raw = value.split(":", 1)
+            hour = int(hour_raw)
+            minute = int(minute_raw)
+        except ValueError as exc:
+            raise ValueError("must be HH:MM in 24-hour time") from exc
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError("must be HH:MM in 24-hour time")
+        return f"{hour:02d}:{minute:02d}"
 
     def as_brightness_bounds(self) -> tuple[int, int]:
         return self.brightness_min, self.brightness_max

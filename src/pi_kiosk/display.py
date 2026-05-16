@@ -34,7 +34,21 @@ class ScreenController:
     def state(self) -> DisplayState:
         return self._state
 
-    def brightness_from_lux(self, lux: Optional[float]) -> int:
+    def brightness_from_lux(self, lux: Optional[float], dark_mode: bool = False) -> int:
+        if self._config.brightness_schedule:
+            if dark_mode:
+                self._logger.debug(
+                    "Night schedule active, using night brightness %s",
+                    self._config.night_brightness,
+                )
+                return self._config.night_brightness
+            if lux is None:
+                self._logger.debug(
+                    "Lux unavailable, using day brightness %s",
+                    self._config.day_brightness,
+                )
+                return self._config.day_brightness
+
         if lux is None:
             self._logger.debug("Lux unavailable, using default brightness %s", self._config.default_brightness)
             return self._config.default_brightness
