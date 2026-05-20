@@ -113,6 +113,14 @@ simply refresh binaries, the venv, and systemd units.
    - Set `BRIGHTNESS_SCHEDULE=true` to apply `DAY_BRIGHTNESS` during the light
      window and `NIGHT_BRIGHTNESS` during the dark window. This works even when
      the ambient light sensor is disabled.
+   - Set `HA_API_BASE_URL`, `HA_ACCESS_TOKEN`, and `HA_MOTION_ENTITY_ID` to use
+     a Home Assistant PIR as the kiosk presence sensor. Each PIR `on` event and
+     touchscreen input event refreshes `PRESENCE_HOLD_SEC`.
+   - Set `ENABLE_IDLE_SCREENSAVER=true` to blank the X screen without sleeping
+     the panel or browser. `IDLE_BRIGHTNESS`, `BRIGHTNESS_FADE_WAKE_SEC`, and
+     `BRIGHTNESS_FADE_IDLE_SEC` control the fade behavior.
+   - Set `ENABLE_BLUE_LIGHT_REDUCTION=true` to apply f.lux-style gamma profiles
+     through `xrandr`; tune `GAMMA_NIGHT` and `GAMMA_IDLE` for warmer output.
    - Backlight control defaults to `brightnessctl` targeting the auto-detected
      device (Pi Display 2 → `11-0045`). If you decline `brightnessctl`
      during install, you will be asked for the exact sysfs brightness path.

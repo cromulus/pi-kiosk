@@ -10,6 +10,7 @@ from .config import ConfigError, KioskConfig, load_config
 from .daylight import is_dark
 from .display import ScreenController
 from .logging_utils import setup_logging
+from .presence import HomeAssistantMotion, InputActivityMonitor
 from .sensors import SensorSuite
 
 
@@ -39,7 +40,11 @@ def run(argv: Optional[list[str]] = None) -> None:
 
     sensors = SensorSuite(config, logger.getChild("sensors"))
     screen = ScreenController(config, logger.getChild("display"))
+    ha_motion = HomeAssistantMotion(config, logger.getChild("ha_motion"))
+    input_activity = InputActivityMonitor(config, logger.getChild("input"))
     logger.info("Initial sensor health: %s", sensors.health_snapshot())
+    if ha_motion.enabled:
+        logger.info("Home Assistant motion presence enabled: %s", config.ha_motion_entity_id)
 
     running = True
 
@@ -51,36 +56,82 @@ def run(argv: Optional[list[str]] = None) -> None:
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
-    last_motion_ts = time.monotonic()
+    last_presence_ts = time.monotonic()
+    if config.enable_idle_screensaver:
+        last_presence_ts -= config.presence_hold_sec + 1
     last_health_log = 0.0
 
-    while running:
-        readings = sensors.read()
-        now = time.monotonic()
+    try:
+        while running:
+            readings = sensors.read()
+            now = time.monotonic()
 
-        distance_capable = config.enable_distance_sensor and sensors.distance_supported
+            distance_capable = config.enable_distance_sensor and sensors.distance_supported
+            presence_detected = False
 
-        if readings.distance_mm is not None:
-            logger.debug("Distance reading: %.2f mm", readings.distance_mm)
-            if readings.distance_mm <= config.distance_threshold_mm:
-                last_motion_ts = now
+            if readings.distance_mm is not None:
+                logger.debug("Distance reading: %.2f mm", readings.distance_mm)
+                if readings.distance_mm <= config.distance_threshold_mm:
+                    presence_detected = True
+
+            ha_motion_state = ha_motion.poll(now)
+            if ha_motion_state:
+                presence_detected = True
+
+            if input_activity.poll():
+                presence_detected = True
+
+            if presence_detected:
+                last_presence_ts = now
                 screen.wake_screen()
 
-        if distance_capable and (now - last_motion_ts) > config.inactivity_timeout_sec:
-            screen.sleep_screen()
+            presence_active = (now - last_presence_ts) <= config.presence_hold_sec
+            dark_mode = is_dark(config)
+            scheduled_brightness = screen.brightness_from_lux(
+                readings.ambient_lux,
+                dark_mode=dark_mode,
+            )
 
-        dark_mode = is_dark(config)
-        brightness = screen.brightness_from_lux(readings.ambient_lux, dark_mode=dark_mode)
-        screen.set_brightness(brightness)
+            if config.enable_idle_screensaver and not presence_active:
+                screen.set_screensaver(True)
+                target_brightness = config.idle_brightness
+                fade_seconds = config.brightness_fade_idle_sec
+                gamma_profile = config.gamma_idle
+            else:
+                screen.set_screensaver(False)
+                target_brightness = scheduled_brightness
+                fade_seconds = config.brightness_fade_wake_sec
+                gamma_profile = config.gamma_night if dark_mode else config.gamma_day
 
-        if readings.ambient_lux is not None:
-            logger.debug("Ambient lux: %.2f -> brightness %s", readings.ambient_lux, brightness)
+            screen.set_gamma_profile(gamma_profile)
+            screen.set_brightness(target_brightness, fade_seconds=fade_seconds)
 
-        if now - last_health_log >= 60:
-            last_health_log = now
-            logger.info("Sensor health: %s", sensors.health_snapshot())
+            if (
+                distance_capable
+                and not config.enable_idle_screensaver
+                and (now - last_presence_ts) > config.inactivity_timeout_sec
+            ):
+                screen.sleep_screen()
 
-        time.sleep(config.poll_interval_sec)
+            if readings.ambient_lux is not None:
+                logger.debug(
+                    "Ambient lux: %.2f -> brightness %s",
+                    readings.ambient_lux,
+                    target_brightness,
+                )
+
+            if now - last_health_log >= 60:
+                last_health_log = now
+                logger.info(
+                    "Sensor health: %s presence_active=%s ha_motion=%s",
+                    sensors.health_snapshot(),
+                    presence_active,
+                    ha_motion_state,
+                )
+
+            time.sleep(config.poll_interval_sec)
+    finally:
+        input_activity.close()
 
     logger.info("Pi Kiosk controller exiting")
 

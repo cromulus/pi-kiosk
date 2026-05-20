@@ -127,6 +127,12 @@ def _solar_event_datetime(
     utc_dt = datetime.combine(day, time.min).replace(tzinfo=ZoneInfo("UTC") if ZoneInfo else None)
     utc_dt = utc_dt + timedelta(hours=utc_hour)
     local_dt = utc_dt.astimezone(tzinfo)
+
+    while local_dt.date() < day:
+        local_dt += timedelta(days=1)
+    while local_dt.date() > day:
+        local_dt -= timedelta(days=1)
+
     return local_dt + timedelta(minutes=offset_minutes)
 
 

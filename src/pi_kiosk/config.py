@@ -85,6 +85,46 @@ class KioskConfig(BaseModel):
         default=0, validation_alias="DAYLIGHT_SUNSET_OFFSET_MIN", ge=-360, le=360
     )
 
+    ha_api_base_url: str | None = Field(
+        default=None, validation_alias="HA_API_BASE_URL"
+    )
+    ha_access_token: str | None = Field(
+        default=None, validation_alias="HA_ACCESS_TOKEN"
+    )
+    ha_motion_entity_id: str | None = Field(
+        default=None, validation_alias="HA_MOTION_ENTITY_ID"
+    )
+    ha_motion_poll_interval_sec: float = Field(
+        default=0.5, validation_alias="HA_MOTION_POLL_INTERVAL_SEC", ge=0.2, le=10.0
+    )
+    presence_hold_sec: int = Field(
+        default=180, validation_alias="PRESENCE_HOLD_SEC", ge=1, le=3600
+    )
+    input_activity_devices: str = Field(
+        default="/dev/input/event1", validation_alias="INPUT_ACTIVITY_DEVICES"
+    )
+
+    enable_idle_screensaver: bool = Field(
+        default=False, validation_alias="ENABLE_IDLE_SCREENSAVER"
+    )
+    idle_brightness: int = Field(
+        default=10, validation_alias="IDLE_BRIGHTNESS", ge=0, le=255
+    )
+    brightness_fade_wake_sec: float = Field(
+        default=0.4, validation_alias="BRIGHTNESS_FADE_WAKE_SEC", ge=0.0, le=30.0
+    )
+    brightness_fade_idle_sec: float = Field(
+        default=3.0, validation_alias="BRIGHTNESS_FADE_IDLE_SEC", ge=0.0, le=60.0
+    )
+
+    enable_blue_light_reduction: bool = Field(
+        default=False, validation_alias="ENABLE_BLUE_LIGHT_REDUCTION"
+    )
+    xrandr_output: str = Field(default="DSI-2", validation_alias="XRANDR_OUTPUT")
+    gamma_day: str = Field(default="1.0:1.0:1.0", validation_alias="GAMMA_DAY")
+    gamma_night: str = Field(default="1.0:0.88:0.65", validation_alias="GAMMA_NIGHT")
+    gamma_idle: str = Field(default="1.0:0.78:0.45", validation_alias="GAMMA_IDLE")
+
     brightnessctl_bin: str = Field(
         default="/usr/bin/brightnessctl", validation_alias="BRIGHTNESSCTL_BIN"
     )
@@ -162,6 +202,28 @@ class KioskConfig(BaseModel):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError("must be HH:MM in 24-hour time")
         return f"{hour:02d}:{minute:02d}"
+
+    @field_validator("ha_api_base_url", "ha_access_token", "ha_motion_entity_id", mode="before")
+    @classmethod
+    def _blank_optional_string(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("gamma_day", "gamma_night", "gamma_idle")
+    @classmethod
+    def _validate_gamma(cls, value: str) -> str:
+        parts = value.split(":")
+        if len(parts) != 3:
+            raise ValueError("gamma must be red:green:blue")
+        try:
+            parsed = [float(part) for part in parts]
+        except ValueError as exc:
+            raise ValueError("gamma values must be numbers") from exc
+        if any(part <= 0 or part > 10 for part in parsed):
+            raise ValueError("gamma values must be greater than 0 and no more than 10")
+        return ":".join(f"{part:g}" for part in parsed)
 
     def as_brightness_bounds(self) -> tuple[int, int]:
         return self.brightness_min, self.brightness_max

@@ -14,6 +14,9 @@ from .config import KioskConfig
 class DisplayState:
     screen_on: bool = True
     brightness: Optional[int] = None
+    brightness_target: Optional[int] = None
+    screensaver_active: bool = False
+    gamma_profile: Optional[str] = None
 
 
 class ScreenController:
@@ -72,16 +75,33 @@ class ScreenController:
         self._run_display_cmd(["xset", "dpms", "force", "off"])
         self._state.screen_on = False
 
-    def set_brightness(self, target: int) -> None:
+    def set_brightness(self, target: int, fade_seconds: float = 0.0) -> None:
         min_b, max_b = self._config.as_brightness_bounds()
         target = int(max(min_b, min(max_b, target)))
 
         if self._state.brightness == target:
+            self._state.brightness_target = target
             return
 
-        if self._use_brightnessctl(target):
+        if (
+            fade_seconds > 0
+            and self._state.brightness is not None
+            and self._state.brightness != target
+        ):
+            elapsed = self._config.poll_interval_sec
+            distance = target - self._state.brightness
+            step = max(1, round(abs(distance) * min(1.0, elapsed / fade_seconds)))
+            if distance < 0:
+                step = -step
+            target_now = self._state.brightness + step
+            if (step > 0 and target_now > target) or (step < 0 and target_now < target):
+                target_now = target
+        else:
+            target_now = target
+
+        if self._use_brightnessctl(target_now):
             self._logger.debug("Brightness set via brightnessctl: %s", target)
-        elif self._write_backlight_file(target):
+        elif self._write_backlight_file(target_now):
             self._logger.debug("Brightness set via backlight file: %s", target)
         else:
             if not self._warned_brightness:
@@ -92,7 +112,41 @@ class ScreenController:
                 self._warned_brightness = True
             return
 
-        self._state.brightness = target
+        self._state.brightness = target_now
+        self._state.brightness_target = target
+
+    def set_screensaver(self, active: bool) -> None:
+        if self._state.screensaver_active == active:
+            return
+
+        if active:
+            self._logger.info("Activating idle screensaver")
+            self._run_display_cmd(["xset", "s", "blank"])
+            self._run_display_cmd(["xset", "s", "activate"])
+        else:
+            self._logger.info("Deactivating idle screensaver")
+            self._run_display_cmd(["xset", "s", "reset"])
+            self._run_display_cmd(["xset", "s", "off"])
+            self._run_display_cmd(["xset", "-dpms"])
+            self._run_display_cmd(["xset", "s", "noblank"])
+
+        self._state.screensaver_active = active
+
+    def set_gamma_profile(self, profile: str) -> None:
+        if not self._config.enable_blue_light_reduction:
+            profile = self._config.gamma_day
+        if self._state.gamma_profile == profile:
+            return
+
+        args = [
+            "xrandr",
+            "--output",
+            self._config.xrandr_output,
+            "--gamma",
+            profile,
+        ]
+        if self._run_display_cmd(args):
+            self._state.gamma_profile = profile
 
     def _use_brightnessctl(self, target: int) -> bool:
         if not self._brightnessctl_bin or not os.path.exists(self._brightnessctl_bin):
@@ -179,7 +233,7 @@ class ScreenController:
             self._logger.warning("Failed writing %s: %s", self._backlight_path, exc)
             return False
 
-    def _run_display_cmd(self, args: list[str]) -> None:
+    def _run_display_cmd(self, args: list[str]) -> bool:
         env = os.environ.copy()
         env.setdefault("DISPLAY", os.getenv("DISPLAY", ":0"))
         xauthority = os.getenv("XAUTHORITY")
@@ -187,6 +241,8 @@ class ScreenController:
             env["XAUTHORITY"] = xauthority
         if not self._run(args, env=env):
             self._logger.warning("Failed to run display command: %s", args)
+            return False
+        return True
 
     def _run(self, args: list[str], env: Optional[dict[str, str]] = None) -> bool:
         try:
