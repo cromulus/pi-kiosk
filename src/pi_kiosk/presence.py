@@ -17,6 +17,13 @@ from .config import KioskConfig
 ACTIVE_HA_STATES = {"on", "home", "detected", "open", "true"}
 INPUT_EVENT_STRUCT = struct.Struct("llHHi")
 INPUT_ACTIVITY_TYPES = {1, 2, 3}
+EV_KEY = 1
+EV_ABS = 3
+BTN_TOUCH = 330
+ABS_Y = 1
+ABS_MT_POSITION_Y = 54
+ABS_MT_TRACKING_ID = 57
+Y_POSITION_CODES = {ABS_Y, ABS_MT_POSITION_Y}
 
 
 class HomeAssistantMotion:
@@ -72,10 +79,32 @@ class _InputDevice:
     fd: int
 
 
+@dataclass(slots=True)
+class InputActivity:
+    activity: bool = False
+    pull_to_refresh: bool = False
+
+    def __bool__(self) -> bool:
+        return self.activity
+
+
+@dataclass(slots=True)
+class _TouchGesture:
+    active: bool = False
+    start_y: Optional[int] = None
+    max_y: Optional[int] = None
+    last_y: Optional[int] = None
+    started_at_edge: bool = False
+    refresh_sent: bool = False
+
+
 class InputActivityMonitor:
     def __init__(self, config: KioskConfig, logger: logging.Logger) -> None:
+        self._config = config
         self._logger = logger
         self._devices: list[_InputDevice] = []
+        self._gesture = _TouchGesture()
+        self._last_pull_to_refresh = 0.0
 
         for raw_path in config.input_activity_devices.split(","):
             path = raw_path.strip()
@@ -102,11 +131,12 @@ class InputActivityMonitor:
                 pass
         self._devices.clear()
 
-    def poll(self) -> bool:
+    def poll(self) -> InputActivity:
         if not self._devices:
-            return False
+            return InputActivity()
 
         activity = False
+        pull_to_refresh = False
         readable, _, _ = select.select([device.fd for device in self._devices], [], [], 0)
         for fd in readable:
             while True:
@@ -121,11 +151,94 @@ class InputActivityMonitor:
                     break
 
                 for offset in range(0, len(data) - INPUT_EVENT_STRUCT.size + 1, INPUT_EVENT_STRUCT.size):
-                    _, _, event_type, _, _ = INPUT_EVENT_STRUCT.unpack_from(data, offset)
+                    _, _, event_type, event_code, event_value = INPUT_EVENT_STRUCT.unpack_from(data, offset)
                     if event_type in INPUT_ACTIVITY_TYPES:
                         activity = True
+                    if self._process_pull_to_refresh_event(
+                        event_type,
+                        event_code,
+                        event_value,
+                    ):
+                        pull_to_refresh = True
 
                 if len(data) < INPUT_EVENT_STRUCT.size * 32:
                     break
 
-        return activity
+        return InputActivity(activity=activity, pull_to_refresh=pull_to_refresh)
+
+    def _process_pull_to_refresh_event(
+        self,
+        event_type: int,
+        event_code: int,
+        event_value: int,
+    ) -> bool:
+        if not self._config.enable_pull_to_refresh:
+            return False
+
+        if event_type == EV_ABS and event_code in Y_POSITION_CODES:
+            self._gesture.last_y = event_value
+            if self._gesture.active:
+                if self._gesture.start_y is None:
+                    self._gesture.start_y = event_value
+                    self._gesture.max_y = event_value
+                    self._gesture.started_at_edge = (
+                        event_value <= self._config.pull_to_refresh_start_max_y
+                    )
+                else:
+                    self._gesture.max_y = max(self._gesture.max_y or event_value, event_value)
+                return self._pull_to_refresh_ready()
+            return False
+
+        if event_type == EV_ABS and event_code == ABS_MT_TRACKING_ID:
+            if event_value >= 0:
+                self._start_touch()
+            else:
+                self._end_touch()
+            return False
+
+        if event_type == EV_KEY and event_code == BTN_TOUCH:
+            if event_value:
+                self._start_touch()
+            else:
+                self._end_touch()
+            return False
+
+        return False
+
+    def _start_touch(self) -> None:
+        self._gesture.active = True
+        self._gesture.start_y = None
+        self._gesture.max_y = None
+        self._gesture.last_y = None
+        self._gesture.started_at_edge = False
+        self._gesture.refresh_sent = False
+
+    def _end_touch(self) -> None:
+        self._gesture.active = False
+        self._gesture.start_y = None
+        self._gesture.max_y = None
+        self._gesture.last_y = None
+        self._gesture.started_at_edge = False
+        self._gesture.refresh_sent = False
+
+    def _pull_to_refresh_ready(self) -> bool:
+        gesture = self._gesture
+        if gesture.refresh_sent or gesture.start_y is None or gesture.max_y is None:
+            return False
+        if not gesture.started_at_edge:
+            return False
+        if gesture.max_y - gesture.start_y < self._config.pull_to_refresh_min_drag:
+            return False
+
+        now = time.monotonic()
+        if now - self._last_pull_to_refresh < self._config.pull_to_refresh_cooldown_sec:
+            return False
+
+        gesture.refresh_sent = True
+        self._last_pull_to_refresh = now
+        self._logger.info(
+            "Pull-to-refresh gesture detected: start_y=%s max_y=%s",
+            gesture.start_y,
+            gesture.max_y,
+        )
+        return True

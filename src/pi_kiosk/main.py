@@ -78,8 +78,11 @@ def run(argv: Optional[list[str]] = None) -> None:
             if ha_motion_state:
                 presence_detected = True
 
-            if input_activity.poll():
+            input_state = input_activity.poll()
+            if input_state:
                 presence_detected = True
+            if input_state.pull_to_refresh:
+                screen.reload_browser()
 
             if presence_detected:
                 last_presence_ts = now

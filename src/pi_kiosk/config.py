@@ -103,6 +103,22 @@ class KioskConfig(BaseModel):
     input_activity_devices: str = Field(
         default="/dev/input/event1", validation_alias="INPUT_ACTIVITY_DEVICES"
     )
+    enable_pull_to_refresh: bool = Field(
+        default=True, validation_alias="ENABLE_PULL_TO_REFRESH"
+    )
+    pull_to_refresh_start_max_y: int = Field(
+        default=40, validation_alias="PULL_TO_REFRESH_START_MAX_Y", ge=0, le=4096
+    )
+    pull_to_refresh_min_drag: int = Field(
+        default=260, validation_alias="PULL_TO_REFRESH_MIN_DRAG", ge=1, le=4096
+    )
+    pull_to_refresh_cooldown_sec: float = Field(
+        default=2.0, validation_alias="PULL_TO_REFRESH_COOLDOWN_SEC", ge=0.1, le=60.0
+    )
+    browser_reload_command: str | None = Field(
+        default="/usr/bin/xdotool key --clearmodifiers F5",
+        validation_alias="BROWSER_RELOAD_COMMAND",
+    )
 
     enable_idle_screensaver: bool = Field(
         default=False, validation_alias="ENABLE_IDLE_SCREENSAVER"
@@ -152,7 +168,13 @@ class KioskConfig(BaseModel):
     )
     vnc_extra_args: str = Field(default="-shared -loop", validation_alias="VNC_EXTRA_ARGS")
 
-    @field_validator("vnc_password_file", mode="before")
+    @field_validator(
+        "vnc_password_file",
+        "brightnessctl_device",
+        "backlight_path",
+        "browser_reload_command",
+        mode="before",
+    )
     @classmethod
     def _empty_to_none(cls, value: str | None) -> str | None:
         if value is None:

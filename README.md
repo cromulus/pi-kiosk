@@ -116,14 +116,21 @@ simply refresh binaries, the venv, and systemd units.
    - Set `HA_API_BASE_URL`, `HA_ACCESS_TOKEN`, and `HA_MOTION_ENTITY_ID` to use
      a Home Assistant PIR as the kiosk presence sensor. Each PIR `on` event and
      touchscreen input event refreshes `PRESENCE_HOLD_SEC`.
+   - Set `ENABLE_PULL_TO_REFRESH=true` to reload Chromium with an edge swipe:
+     start offscreen/top-edge, enter the panel within `PULL_TO_REFRESH_START_MAX_Y`
+     pixels, then drag down at least `PULL_TO_REFRESH_MIN_DRAG` pixels. This
+     keeps normal Home Assistant drag controls from triggering reloads.
    - Set `ENABLE_IDLE_SCREENSAVER=true` to blank the X screen without sleeping
      the panel or browser. `IDLE_BRIGHTNESS`, `BRIGHTNESS_FADE_WAKE_SEC`, and
      `BRIGHTNESS_FADE_IDLE_SEC` control the fade behavior.
    - Set `ENABLE_BLUE_LIGHT_REDUCTION=true` to apply f.lux-style gamma profiles
      through `xrandr`; tune `GAMMA_NIGHT` and `GAMMA_IDLE` for warmer output.
    - Backlight control defaults to `brightnessctl` targeting the auto-detected
-     device (Pi Display 2 → `11-0045`). If you decline `brightnessctl`
-     during install, you will be asked for the exact sysfs brightness path.
+     backlight device. Pi OS/kernel updates may expose the same panel under
+     names such as `11-0045` or `panel_backlight@1`; the controller will fall
+     back to the current `/sys/class/backlight` device if the saved name stops
+     working. If you decline `brightnessctl` during install, you will be asked
+     for the exact sysfs brightness path.
    - You normally do not need to touch group membership or Xorg permissions—the
      install script already adds the `kiosk` user to `video,input,render` and
      configures `/etc/X11/Xwrapper.config` with `allowed_users=anybody`.

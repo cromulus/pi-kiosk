@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
+import shlex
 import subprocess
 import time
 from dataclasses import dataclass
@@ -10,13 +12,18 @@ from typing import Optional
 from .config import KioskConfig
 
 
+DISPLAY_STATE_REFRESH_SEC = 30.0
+
+
 @dataclass(slots=True)
 class DisplayState:
     screen_on: bool = True
     brightness: Optional[int] = None
     brightness_target: Optional[int] = None
     screensaver_active: bool = False
+    screensaver_applied_at: float = 0.0
     gamma_profile: Optional[str] = None
+    gamma_applied_at: float = 0.0
 
 
 class ScreenController:
@@ -68,6 +75,24 @@ class ScreenController:
         self._run_display_cmd(["xset", "dpms", "force", "on"])
         self._state.screen_on = True
 
+    def reload_browser(self) -> bool:
+        if not self._config.browser_reload_command:
+            return False
+        try:
+            args = shlex.split(self._config.browser_reload_command)
+        except ValueError as exc:
+            self._logger.warning("Invalid browser reload command: %s", exc)
+            return False
+        if not args:
+            return False
+
+        self._logger.info("Reloading browser from pull-to-refresh gesture")
+        env = self._display_env()
+        if self._run(args, env=env):
+            return True
+        self._logger.warning("Failed to run browser reload command: %s", args)
+        return False
+
     def sleep_screen(self) -> None:
         if not self._state.screen_on:
             return
@@ -116,26 +141,49 @@ class ScreenController:
         self._state.brightness_target = target
 
     def set_screensaver(self, active: bool) -> None:
-        if self._state.screensaver_active == active:
+        now = time.monotonic()
+        refresh_due = (
+            active
+            and self._state.screensaver_active == active
+            and now - self._state.screensaver_applied_at >= DISPLAY_STATE_REFRESH_SEC
+        )
+        if self._state.screensaver_active == active and not refresh_due:
             return
 
+        commands: list[list[str]]
         if active:
-            self._logger.info("Activating idle screensaver")
-            self._run_display_cmd(["xset", "s", "blank"])
-            self._run_display_cmd(["xset", "s", "activate"])
+            if refresh_due:
+                self._logger.debug("Refreshing idle screensaver")
+            else:
+                self._logger.info("Activating idle screensaver")
+            commands = [
+                ["xset", "s", "blank"],
+                ["xset", "s", "activate"],
+            ]
         else:
             self._logger.info("Deactivating idle screensaver")
-            self._run_display_cmd(["xset", "s", "reset"])
-            self._run_display_cmd(["xset", "s", "off"])
-            self._run_display_cmd(["xset", "-dpms"])
-            self._run_display_cmd(["xset", "s", "noblank"])
+            commands = [
+                ["xset", "s", "reset"],
+                ["xset", "s", "off"],
+                ["xset", "-dpms"],
+                ["xset", "s", "noblank"],
+            ]
 
-        self._state.screensaver_active = active
+        success = True
+        for command in commands:
+            success = self._run_display_cmd(command) and success
+        if success:
+            self._state.screensaver_active = active
+            self._state.screensaver_applied_at = now
 
     def set_gamma_profile(self, profile: str) -> None:
         if not self._config.enable_blue_light_reduction:
             profile = self._config.gamma_day
-        if self._state.gamma_profile == profile:
+        now = time.monotonic()
+        if (
+            self._state.gamma_profile == profile
+            and now - self._state.gamma_applied_at < DISPLAY_STATE_REFRESH_SEC
+        ):
             return
 
         args = [
@@ -147,18 +195,24 @@ class ScreenController:
         ]
         if self._run_display_cmd(args):
             self._state.gamma_profile = profile
+            self._state.gamma_applied_at = now
 
     def _use_brightnessctl(self, target: int) -> bool:
         if not self._brightnessctl_bin or not os.path.exists(self._brightnessctl_bin):
             return False
 
-        args = [self._brightnessctl_bin]
-        if self._brightnessctl_device:
-            args.append(f"--device={self._brightnessctl_device}")
         actual_target = self._brightnessctl_target(target)
-        args.extend(["set", str(actual_target)])
+        args = self._brightnessctl_args("set", str(actual_target))
         if self._run(args):
             return True
+
+        self._brightnessctl_max_loaded = False
+        self._brightnessctl_max = None
+        actual_target = self._brightnessctl_target(target)
+        retry_args = self._brightnessctl_args("set", str(actual_target))
+        if retry_args != args and self._run(retry_args):
+            return True
+
         self._warn_brightnessctl_failure(args)
         return False
 
@@ -181,9 +235,55 @@ class ScreenController:
         if not self._brightnessctl_bin or not os.path.exists(self._brightnessctl_bin):
             return None
 
-        args = [self._brightnessctl_bin]
+        configured_device = self._brightnessctl_device
+        for candidate in self._brightnessctl_device_candidates():
+            max_value = self._read_brightnessctl_max(candidate)
+            if max_value is None:
+                continue
+            self._brightnessctl_device = candidate
+            self._brightnessctl_max = max_value
+            if candidate != configured_device:
+                self._logger.info(
+                    "Using brightnessctl device %s instead of configured %s",
+                    candidate or "<default>",
+                    configured_device or "<default>",
+                )
+            return max_value
+        return None
+
+    def _brightnessctl_args(self, *args: str) -> list[str]:
+        command = [self._brightnessctl_bin]
         if self._brightnessctl_device:
-            args.append(f"--device={self._brightnessctl_device}")
+            command.append(f"--device={self._brightnessctl_device}")
+        command.extend(args)
+        return command
+
+    def _brightnessctl_device_candidates(self) -> list[Optional[str]]:
+        candidates: list[Optional[str]] = []
+
+        if self._brightnessctl_device:
+            candidates.append(self._brightnessctl_device)
+
+        backlight_root = Path("/sys/class/backlight")
+        try:
+            backlight_devices = sorted(
+                path.name for path in backlight_root.iterdir() if path.is_dir()
+            )
+        except OSError:
+            backlight_devices = []
+
+        for device in backlight_devices:
+            if device not in candidates:
+                candidates.append(device)
+
+        if None not in candidates:
+            candidates.append(None)
+        return candidates
+
+    def _read_brightnessctl_max(self, device: Optional[str]) -> Optional[int]:
+        args = [self._brightnessctl_bin]
+        if device:
+            args.append(f"--device={device}")
         args.append("max")
 
         try:
@@ -205,7 +305,6 @@ class ScreenController:
             return None
         if max_value <= 0:
             return None
-        self._brightnessctl_max = max_value
         return max_value
 
     def _warn_brightnessctl_failure(self, args: list[str]) -> None:
@@ -234,15 +333,19 @@ class ScreenController:
             return False
 
     def _run_display_cmd(self, args: list[str]) -> bool:
+        env = self._display_env()
+        if not self._run(args, env=env):
+            self._logger.warning("Failed to run display command: %s", args)
+            return False
+        return True
+
+    def _display_env(self) -> dict[str, str]:
         env = os.environ.copy()
         env.setdefault("DISPLAY", os.getenv("DISPLAY", ":0"))
         xauthority = os.getenv("XAUTHORITY")
         if xauthority:
             env["XAUTHORITY"] = xauthority
-        if not self._run(args, env=env):
-            self._logger.warning("Failed to run display command: %s", args)
-            return False
-        return True
+        return env
 
     def _run(self, args: list[str], env: Optional[dict[str, str]] = None) -> bool:
         try:

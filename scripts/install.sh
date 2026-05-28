@@ -33,6 +33,7 @@ APT_PACKAGES=(
   matchbox-window-manager
   unclutter
   brightnessctl
+  xdotool
   x11vnc
   avahi-daemon
   avahi-utils
@@ -159,7 +160,7 @@ detect_backlight_path() {
     echo "${candidate}/brightness"
     return
   done
-  echo "/sys/class/backlight/11-0045/brightness"
+  echo ""
 }
 
 detect_brightnessctl_device() {
@@ -171,12 +172,23 @@ detect_brightnessctl_device() {
     echo "${name}"
     return
   done
-  echo "11-0045"
+  echo ""
 }
 
 normalize_brightnessctl_device() {
   local device="$1"
   printf '%s' "${device#backlight/}"
+}
+
+brightnessctl_device_usable() {
+  local device="${1:-}"
+  command -v brightnessctl >/dev/null 2>&1 || return 1
+
+  local args=(brightnessctl)
+  if [[ -n "${device}" ]]; then
+    args+=("--device=${device}")
+  fi
+  "${args[@]}" info >/dev/null 2>&1
 }
 
 xml_escape() {
@@ -265,9 +277,13 @@ configure_runtime() {
   local use_bctl
   use_bctl=$(prompt_bool "Use brightnessctl for dimming (recommended)" "${default_use_bctl}")
   if [[ "${use_bctl}" == "true" ]]; then
-    local device_default
-    device_default="${BRIGHTNESSCTL_DEVICE:-$(detect_brightnessctl_device)}"
-    device_default="$(normalize_brightnessctl_device "${device_default}")"
+    local configured_device device_default
+    configured_device="$(normalize_brightnessctl_device "${BRIGHTNESSCTL_DEVICE:-}")"
+    if [[ -n "${configured_device}" ]] && brightnessctl_device_usable "${configured_device}"; then
+      device_default="${configured_device}"
+    else
+      device_default="$(detect_brightnessctl_device)"
+    fi
     set_env_var BRIGHTNESSCTL_BIN "\"/usr/bin/brightnessctl\""
     set_env_var BRIGHTNESSCTL_DEVICE "\"${device_default}\""
     set_env_var BACKLIGHT_PATH "\"\""
