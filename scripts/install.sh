@@ -395,6 +395,8 @@ perform_uninstall() {
 
   log_step "Stopping kiosk services"
   systemctl disable --now "kiosk-browser@${KIOSK_USER}.service" >/dev/null 2>&1 || true
+  systemctl disable --now "kiosk-sensors@${KIOSK_USER}.service" >/dev/null 2>&1 || true
+  systemctl disable --now "kiosk-vnc@${KIOSK_USER}.service" >/dev/null 2>&1 || true
   systemctl disable --now kiosk-sensors.service >/dev/null 2>&1 || true
   systemctl disable --now kiosk-vnc.service >/dev/null 2>&1 || true
 
@@ -405,6 +407,8 @@ perform_uninstall() {
         /usr/local/bin/launch_vnc.sh
 
   rm -f "${SYSTEMD_DIR}/kiosk-browser@.service" \
+        "${SYSTEMD_DIR}/kiosk-sensors@.service" \
+        "${SYSTEMD_DIR}/kiosk-vnc@.service" \
         "${SYSTEMD_DIR}/kiosk-sensors.service" \
         "${SYSTEMD_DIR}/kiosk-vnc.service"
   rm -f "${AVAHI_SERVICE_DIR}/pi-kiosk-ssh.service" \
@@ -432,6 +436,8 @@ run_diagnostics() {
   fi
 
   local browser_unit="kiosk-browser@${KIOSK_USER}.service"
+  local sensors_unit="kiosk-sensors@${KIOSK_USER}.service"
+  local vnc_unit="kiosk-vnc@${KIOSK_USER}.service"
   if systemctl is-active --quiet "${browser_unit}"; then
     echo "  [OK] ${browser_unit} active."
   else
@@ -439,18 +445,18 @@ run_diagnostics() {
     failures=1
   fi
 
-  if systemctl is-active --quiet kiosk-sensors.service; then
-    echo "  [OK] kiosk-sensors.service active."
+  if systemctl is-active --quiet "${sensors_unit}"; then
+    echo "  [OK] ${sensors_unit} active."
   else
-    echo "  [FAIL] kiosk-sensors.service not active."
+    echo "  [FAIL] ${sensors_unit} not active."
     failures=1
   fi
 
   if [[ "${ENABLE_VNC,,}" == "true" ]]; then
-    if systemctl is-active --quiet kiosk-vnc.service; then
-      echo "  [OK] kiosk-vnc.service active."
+    if systemctl is-active --quiet "${vnc_unit}"; then
+      echo "  [OK] ${vnc_unit} active."
     else
-      echo "  [FAIL] kiosk-vnc.service not active."
+      echo "  [FAIL] ${vnc_unit} not active."
       failures=1
     fi
     if [[ -n "${VNC_PASSWORD_FILE:-}" ]]; then
@@ -485,6 +491,17 @@ run_diagnostics() {
       fi
     else
       echo "  [WARN] BRIGHTNESSCTL_BIN points to missing binary (${BRIGHTNESSCTL_BIN})."
+    fi
+    local backlight_candidates=()
+    local candidate
+    for candidate in /sys/class/backlight/*; do
+      [[ -d "${candidate}" ]] || continue
+      backlight_candidates+=("$(basename "${candidate}")")
+    done
+    if [[ "${#backlight_candidates[@]}" -gt 0 ]]; then
+      echo "  [OK] Backlight candidates: ${backlight_candidates[*]}"
+    else
+      echo "  [WARN] No /sys/class/backlight candidates detected."
     fi
   elif [[ -n "${BACKLIGHT_PATH:-}" ]]; then
     if [[ -w "${BACKLIGHT_PATH}" ]]; then
@@ -627,10 +644,11 @@ install -m 755 "${REPO_ROOT}/src/launch_vnc.sh" /usr/local/bin/launch_vnc.sh
 log_step "Installing systemd units"
 install -m 644 "${REPO_ROOT}/services/kiosk-browser.service" \
   "${SYSTEMD_DIR}/kiosk-browser@.service"
-install -m 644 "${REPO_ROOT}/services/kiosk-sensors.service" \
-  "${SYSTEMD_DIR}/kiosk-sensors.service"
-install -m 644 "${REPO_ROOT}/services/kiosk-vnc.service" \
-  "${SYSTEMD_DIR}/kiosk-vnc.service"
+install -m 644 "${REPO_ROOT}/services/kiosk-sensors@.service" \
+  "${SYSTEMD_DIR}/kiosk-sensors@.service"
+install -m 644 "${REPO_ROOT}/services/kiosk-vnc@.service" \
+  "${SYSTEMD_DIR}/kiosk-vnc@.service"
+rm -f "${SYSTEMD_DIR}/kiosk-sensors.service" "${SYSTEMD_DIR}/kiosk-vnc.service"
 
 XWRAPPER="/etc/X11/Xwrapper.config"
 cat <<'EOF' >"${XWRAPPER}"
@@ -640,14 +658,15 @@ EOF
 install -d -m 1777 -o root -g root /tmp/.X11-unix
 
 systemctl daemon-reload
+systemctl disable --now kiosk-sensors.service kiosk-vnc.service >/dev/null 2>&1 || true
 systemctl reenable --now "kiosk-browser@${KIOSK_USER}.service"
-systemctl reenable --now kiosk-sensors.service
+systemctl reenable --now "kiosk-sensors@${KIOSK_USER}.service"
 
 load_existing_config
 if [[ "${ENABLE_VNC,,}" == "true" ]]; then
-  systemctl reenable --now kiosk-vnc.service
+  systemctl reenable --now "kiosk-vnc@${KIOSK_USER}.service"
 else
-  systemctl disable --now kiosk-vnc.service >/dev/null 2>&1 || true
+  systemctl disable --now "kiosk-vnc@${KIOSK_USER}.service" >/dev/null 2>&1 || true
 fi
 
 run_diagnostics

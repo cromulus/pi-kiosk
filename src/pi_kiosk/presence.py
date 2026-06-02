@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 import select
 import struct
 import time
@@ -24,6 +25,8 @@ ABS_Y = 1
 ABS_MT_POSITION_Y = 54
 ABS_MT_TRACKING_ID = 57
 Y_POSITION_CODES = {ABS_Y, ABS_MT_POSITION_Y}
+INPUT_REOPEN_INTERVAL_SEC = 10.0
+TOUCH_NAME_MARKERS = ("touch", "goodix", "capacitive")
 
 
 class HomeAssistantMotion:
@@ -105,23 +108,130 @@ class InputActivityMonitor:
         self._devices: list[_InputDevice] = []
         self._gesture = _TouchGesture()
         self._last_pull_to_refresh = 0.0
+        self._next_reopen = 0.0
+        self._last_open_warning = 0.0
+        self._requested_paths = [
+            path
+            for path in (
+                raw_path.strip() for raw_path in config.input_activity_devices.split(",")
+            )
+            if path and path.lower() != "auto"
+        ]
 
-        for raw_path in config.input_activity_devices.split(","):
-            path = raw_path.strip()
-            if not path:
+        self._refresh_devices(initial=True)
+
+    @property
+    def healthy(self) -> bool:
+        return bool(self._devices)
+
+    def health_snapshot(self) -> dict[str, object]:
+        return {
+            "input_devices_ok": self.healthy,
+            "input_devices": [device.path for device in self._devices],
+            "input_discovery": self._config.input_activity_devices,
+        }
+
+    def _refresh_devices(self, initial: bool = False) -> None:
+        opened_paths = {device.path for device in self._devices}
+        opened_new = False
+        now = time.monotonic()
+
+        for path in self._candidate_paths():
+            if path in opened_paths:
                 continue
             try:
                 fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
             except OSError as exc:
-                self._logger.warning("Unable to monitor input device %s: %s", path, exc)
+                self._warn_open_failure(now, path, exc, initial)
                 continue
             self._devices.append(_InputDevice(path=path, fd=fd))
+            opened_paths.add(path)
+            opened_new = True
 
-        if self._devices:
+        if opened_new:
             self._logger.info(
                 "Monitoring input activity from: %s",
                 ", ".join(device.path for device in self._devices),
             )
+        elif initial and not self._devices:
+            self._logger.warning(
+                "No input activity devices opened from %s; will retry with discovery",
+                self._config.input_activity_devices,
+            )
+
+        if not self._devices:
+            self._next_reopen = now + INPUT_REOPEN_INTERVAL_SEC
+
+    def _warn_open_failure(
+        self,
+        now: float,
+        path: str,
+        exc: OSError,
+        initial: bool,
+    ) -> None:
+        if not initial and now - self._last_open_warning < 60:
+            return
+        self._last_open_warning = now
+        self._logger.warning("Unable to monitor input device %s: %s", path, exc)
+
+    def _candidate_paths(self) -> list[str]:
+        paths: list[str] = []
+        for path in self._requested_paths:
+            self._append_unique_path(paths, path)
+
+        for path in self._discover_touch_event_paths():
+            self._append_unique_path(paths, path)
+
+        return paths
+
+    def _append_unique_path(self, paths: list[str], path: str) -> None:
+        if not path:
+            return
+        try:
+            path_key = str(Path(path).resolve(strict=False))
+        except OSError:
+            path_key = path
+        for existing in paths:
+            try:
+                existing_key = str(Path(existing).resolve(strict=False))
+            except OSError:
+                existing_key = existing
+            if existing_key == path_key:
+                return
+        paths.append(path)
+
+    def _discover_touch_event_paths(self) -> list[str]:
+        paths: list[str] = []
+        proc_path = Path("/proc/bus/input/devices")
+        try:
+            blocks = proc_path.read_text(encoding="utf-8").split("\n\n")
+        except OSError:
+            blocks = []
+
+        for block in blocks:
+            name = ""
+            handlers = ""
+            for line in block.splitlines():
+                if line.startswith("N: Name="):
+                    name = line.partition("=")[2].strip().strip('"')
+                elif line.startswith("H: Handlers="):
+                    handlers = line.partition("=")[2]
+
+            lower_name = name.lower()
+            if not any(marker in lower_name for marker in TOUCH_NAME_MARKERS):
+                continue
+
+            for token in handlers.split():
+                if token.startswith("event"):
+                    self._append_unique_path(paths, f"/dev/input/{token}")
+
+        for glob_pattern in ("/dev/input/by-id/*event*", "/dev/input/by-path/*event*"):
+            for candidate in sorted(Path("/").glob(glob_pattern.lstrip("/"))):
+                lower_name = candidate.name.lower()
+                if any(marker in lower_name for marker in TOUCH_NAME_MARKERS):
+                    self._append_unique_path(paths, str(candidate))
+
+        return paths
 
     def close(self) -> None:
         for device in self._devices:
@@ -133,11 +243,25 @@ class InputActivityMonitor:
 
     def poll(self) -> InputActivity:
         if not self._devices:
+            now = time.monotonic()
+            if now >= self._next_reopen:
+                self._refresh_devices()
             return InputActivity()
 
         activity = False
         pull_to_refresh = False
-        readable, _, _ = select.select([device.fd for device in self._devices], [], [], 0)
+        try:
+            readable, _, _ = select.select(
+                [device.fd for device in self._devices],
+                [],
+                [],
+                0,
+            )
+        except OSError as exc:
+            self._logger.warning("Input device select failed: %s", exc)
+            self._close_all_and_schedule_reopen()
+            return InputActivity()
+
         for fd in readable:
             while True:
                 try:
@@ -146,8 +270,10 @@ class InputActivityMonitor:
                     break
                 except OSError as exc:
                     self._logger.warning("Input device read failed: %s", exc)
+                    self._close_device(fd)
                     break
                 if not data:
+                    self._close_device(fd)
                     break
 
                 for offset in range(0, len(data) - INPUT_EVENT_STRUCT.size + 1, INPUT_EVENT_STRUCT.size):
@@ -165,6 +291,24 @@ class InputActivityMonitor:
                     break
 
         return InputActivity(activity=activity, pull_to_refresh=pull_to_refresh)
+
+    def _close_device(self, fd: int) -> None:
+        kept: list[_InputDevice] = []
+        for device in self._devices:
+            if device.fd != fd:
+                kept.append(device)
+                continue
+            try:
+                os.close(device.fd)
+            except OSError:
+                pass
+            self._logger.warning("Stopped monitoring input device %s", device.path)
+        self._devices = kept
+        self._next_reopen = time.monotonic() + INPUT_REOPEN_INTERVAL_SEC
+
+    def _close_all_and_schedule_reopen(self) -> None:
+        self.close()
+        self._next_reopen = time.monotonic() + INPUT_REOPEN_INTERVAL_SEC
 
     def _process_pull_to_refresh_event(
         self,

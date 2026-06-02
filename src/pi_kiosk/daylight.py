@@ -170,6 +170,12 @@ def daylight_window(config: KioskConfig, day: date, tzinfo=None) -> DaylightWind
     return _fixed_window(config, day, tzinfo)
 
 
+def current_daylight_window(config: KioskConfig, now: Optional[datetime] = None) -> DaylightWindow:
+    tzinfo = _configured_timezone(config)
+    local_now = now.astimezone(tzinfo) if now else datetime.now(tzinfo)
+    return daylight_window(config, local_now.date(), tzinfo)
+
+
 def is_dark(config: KioskConfig, now: Optional[datetime] = None) -> bool:
     tzinfo = _configured_timezone(config)
     now = now.astimezone(tzinfo) if now else datetime.now(tzinfo)

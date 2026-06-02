@@ -7,7 +7,7 @@ import time
 from typing import Optional
 
 from .config import ConfigError, KioskConfig, load_config
-from .daylight import is_dark
+from .daylight import current_daylight_window, is_dark, seconds_until_transition
 from .display import ScreenController
 from .logging_utils import setup_logging
 from .presence import HomeAssistantMotion, InputActivityMonitor
@@ -42,9 +42,32 @@ def run(argv: Optional[list[str]] = None) -> None:
     screen = ScreenController(config, logger.getChild("display"))
     ha_motion = HomeAssistantMotion(config, logger.getChild("ha_motion"))
     input_activity = InputActivityMonitor(config, logger.getChild("input"))
+    screen.preflight()
     logger.info("Initial sensor health: %s", sensors.health_snapshot())
+    logger.info("Initial input health: %s", input_activity.health_snapshot())
+    logger.info("Initial display health: %s", screen.health_snapshot())
     if ha_motion.enabled:
         logger.info("Home Assistant motion presence enabled: %s", config.ha_motion_entity_id)
+    elif config.ha_api_base_url or config.ha_access_token or config.ha_motion_entity_id:
+        logger.warning(
+            "Home Assistant motion presence is not fully configured; API URL, token, and entity ID are all required"
+        )
+
+    if config.enable_idle_screensaver and not (
+        config.enable_distance_sensor or ha_motion.enabled or input_activity.healthy
+    ):
+        logger.warning(
+            "Idle screensaver is enabled but no presence source is currently available"
+        )
+
+    daylight = current_daylight_window(config)
+    logger.info(
+        "Initial daylight mode: dark=%s light_start=%s dark_start=%s next_transition_sec=%s",
+        is_dark(config),
+        daylight.light_start.isoformat(),
+        daylight.dark_start.isoformat(),
+        seconds_until_transition(config),
+    )
 
     running = True
 
@@ -126,10 +149,15 @@ def run(argv: Optional[list[str]] = None) -> None:
             if now - last_health_log >= 60:
                 last_health_log = now
                 logger.info(
-                    "Sensor health: %s presence_active=%s ha_motion=%s",
+                    "Controller health: sensors=%s input=%s display=%s presence_active=%s ha_motion_enabled=%s ha_motion=%s dark_mode=%s next_transition_sec=%s",
                     sensors.health_snapshot(),
+                    input_activity.health_snapshot(),
+                    screen.health_snapshot(),
                     presence_active,
+                    ha_motion.enabled,
                     ha_motion_state,
+                    dark_mode,
+                    seconds_until_transition(config),
                 )
 
             time.sleep(config.poll_interval_sec)

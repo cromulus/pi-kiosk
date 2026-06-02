@@ -1,10 +1,11 @@
 [Unit]
 Description=Sensor-driven screen + brightness control for the kiosk
-After=multi-user.target
+After=multi-user.target kiosk-browser@%i.service
+Wants=kiosk-browser@%i.service
 
 [Service]
 Type=simple
-User=kiosk
+User=%i
 EnvironmentFile=/etc/pi-kiosk/kiosk.env
 ExecStart=/opt/pi-kiosk/venv/bin/kiosk-sensors --config /etc/pi-kiosk/kiosk.env
 Restart=always

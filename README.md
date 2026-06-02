@@ -68,7 +68,7 @@ What the script does:
    `pip install` (reinstalling on every run so `git pull` updates take effect).
 4. Copies the shell helpers into `/usr/local/bin`.
 5. Drops a config file in `/etc/pi-kiosk/kiosk.env` (only created if missing).
-6. Installs + enables `kiosk-browser@kiosk.service` and `kiosk-sensors.service`.
+6. Installs + enables `kiosk-browser@kiosk.service` and `kiosk-sensors@kiosk.service`.
 
 You can rerun the script any time after a `git pull`; it is idempotent and will
 simply refresh binaries, the venv, and systemd units.
@@ -78,7 +78,8 @@ simply refresh binaries, the venv, and systemd units.
    you need.
 2. Log in once through the kiosk browser over VNC or with a local keyboard. The
    Chromium profile is persistent, so future restarts reuse the Home Assistant
-   frontend session.
+   frontend session. A Home Assistant long-lived access token is only for API
+   calls such as PIR polling; it cannot log Chromium into the frontend.
 3. Edit `/etc/pi-kiosk/kiosk.env` (created from `config/kiosk.env.sample` and
    auto-tuned by the installer):
    - Set `HA_BASE_URL` to the exact dashboard/view URL you want to load from
@@ -141,7 +142,7 @@ simply refresh binaries, the venv, and systemd units.
 - `kiosk-browser@kiosk.service`  
   Launches Xorg + Chromium on VT7 in full kiosk mode. Controlled by
   `/usr/local/bin/launch_kiosk.sh` and `kiosk_xsession.sh`.
-- `kiosk-sensors.service`  
+- `kiosk-sensors@kiosk.service`
   Runs the `kiosk-sensors` console script from the venv, which:
   - Wakes the display when someone enters `DISTANCE_THRESHOLD_MM`.
   - Blanks after `INACTIVITY_TIMEOUT_SEC` (only if the ToF sensor is working).
@@ -149,15 +150,16 @@ simply refresh binaries, the venv, and systemd units.
     `DEFAULT_BRIGHTNESS` if the light sensor is missing.
   - Reports sensor health every minute and emits DEBUG logs per reading when
     enabled.
-- `kiosk-vnc.service`  
+- `kiosk-vnc@kiosk.service`
   (Optional) Runs x11vnc bound to the kiosk X session. Enable it by setting
   `ENABLE_VNC=true` in the config and rerunning the installer.
 - mDNS/Bonjour discovery
   When `ENABLE_MDNS=true`, Avahi publishes the host as `<hostname>.local`.
   The installer also advertises SSH and, when VNC is enabled, the VNC mirror.
 
-Both services default to the `kiosk` user and restart automatically if they
-crash. Journald captures logs (`journalctl -u kiosk-sensors.service`).
+The browser, sensor controller, and VNC mirror all run as the configured kiosk
+user through templated systemd units. Journald captures logs
+(`journalctl -u kiosk-sensors@kiosk.service`).
 
 ## Resilience notes
 - Missing sensors: the Python daemon keeps running, uses the fallback brightness,
@@ -172,13 +174,20 @@ crash. Journald captures logs (`journalctl -u kiosk-sensors.service`).
   `/sys/class/backlight/.../brightness` if `brightnessctl` is not viable.
 - Home Assistant authentication: long-lived access tokens are for API access,
   not frontend login. Let Chromium keep the kiosk user's browser session instead.
+  If the kiosk returns to the HA login page after a reboot or refresh, first
+  verify that the Chromium profile under `/home/<kiosk-user>/.config/chromium`
+  is writable and persistent, then log in once through VNC or the local display.
+  For the most reliable unattended setup, prefer a LAN Home Assistant URL and
+  Home Assistant trusted-network policy over Cloudflare/reverse-proxy frontend
+  authentication.
 
 ## Development flow
 - Modify files locally → `git commit` → `git push`.
 - On the Pi: `cd /path/to/pi-kiosk && git pull && sudo ./scripts/install.sh`.
 - Restart only the bits you touched:
   - Browser: `sudo systemctl restart kiosk-browser@kiosk`.
-  - Sensors: `sudo systemctl restart kiosk-sensors`.
+  - Sensors: `sudo systemctl restart kiosk-sensors@kiosk`.
+  - VNC: `sudo systemctl restart kiosk-vnc@kiosk`.
 
 Feel free to extend the Python daemon (e.g., publish metrics to MQTT) or the
 install script (e.g., add custom fonts/themes). The install process is the only

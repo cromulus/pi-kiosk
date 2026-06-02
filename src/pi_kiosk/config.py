@@ -4,6 +4,7 @@ import os
 import shlex
 from pathlib import Path
 from typing import Iterable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     AnyHttpUrl,
@@ -12,6 +13,7 @@ from pydantic import (
     FieldValidationInfo,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 
@@ -173,6 +175,7 @@ class KioskConfig(BaseModel):
         "brightnessctl_device",
         "backlight_path",
         "browser_reload_command",
+        "daylight_timezone",
         mode="before",
     )
     @classmethod
@@ -212,6 +215,17 @@ class KioskConfig(BaseModel):
             )
         return normalized
 
+    @field_validator("daylight_timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"unknown timezone {value!r}") from exc
+        return value
+
     @field_validator("daylight_light_start", "daylight_dark_start")
     @classmethod
     def _validate_hhmm(cls, value: str) -> str:
@@ -246,6 +260,16 @@ class KioskConfig(BaseModel):
         if any(part <= 0 or part > 10 for part in parsed):
             raise ValueError("gamma values must be greater than 0 and no more than 10")
         return ":".join(f"{part:g}" for part in parsed)
+
+    @model_validator(mode="after")
+    def _validate_cross_field_settings(self) -> "KioskConfig":
+        if self.daylight_schedule == "sun" and (
+            self.daylight_latitude is None or self.daylight_longitude is None
+        ):
+            raise ValueError(
+                "DAYLIGHT_SCHEDULE=sun requires DAYLIGHT_LATITUDE and DAYLIGHT_LONGITUDE"
+            )
+        return self
 
     def as_brightness_bounds(self) -> tuple[int, int]:
         return self.brightness_min, self.brightness_max

@@ -1,0 +1,43 @@
+TODO - Pi Kiosk Hardening
+=========================
+
+Priority: P0 = prevents common outage
+Priority: P1 = reduces risk / improves resilience
+Priority: P2 = cleanup / quality
+
+P0: Prevent service/user contract drift
+- [x] Fix kiosk-sensors.service to use configured KIOSK_USER instead of hardcoded `kiosk`.
+- [x] Add config sanity check: if HA URL, input devices, or output controls are missing, emit a clear one-time startup error.
+- [x] Add startup preflight for required binaries and files (`xset`, `xrandr`, `brightnessctl` or BACKLIGHT_PATH, XAUTHORITY/DISPLAY)
+
+P0: Make day/night behavior deterministic and synchronized
+- [x] Centralize day/night mode calculation in one path (no dual logic drift between Python daemon and shell launch script).
+- [ ] In browser session, avoid shell-level theme restart as the only mechanism for daylight schedule changes.
+- [x] Add explicit handling for invalid timezone/config transitions and log next transition every cycle.
+
+P1: Make runtime presence and input resilient
+- [x] Replace fixed `/dev/input/event1` assumption with auto-discovery fallback list and re-scan on repeated read failures.
+- [x] On touch input read failures, keep device reopen retries with bounded backoff instead of permanently dropping all input.
+- [x] Add a small health metric in logs: `distance_supported`, `light_supported`, `ha_motion_enabled`, `input_devices_ok`, `brightness_backend`.
+
+P1: Improve brightness/gamma robustness
+- [x] Add final-state verification after brightness/gamma operations and retry degraded path on failure.
+- [x] Add a safe fallback chain for gamma: requested profile -> known-good profile -> no-op with warning.
+- [x] Record and expose chosen backlight control backend each cycle (brightnessctl/backlight file), especially after hot-plug or driver changes.
+
+P1: Reduce HA session fragility
+- [x] Add explicit operational runbook: “HA API token is not browser login.”
+- [x] Point kiosk at LAN HA URL where possible and prefer trusted networks for session persistence.
+- [ ] Add periodic front-end soft-reload only on network/API-visible failures (not every cycle).
+
+P2: Operability improvements
+- [ ] Add `systemd` service-level `RestartPreventExitStatus` / better backoff notes for recurring crashes.
+- [x] Add `TODO` comments in deploy guide for known tradeoffs: VNC auth on/off, pull-to-refresh interactions, and screen saver state expectations.
+- [x] Extend install diagnostics to include `/sys/class/backlight` candidates and selected backlight device.
+- [x] Document exact recovery steps after reboot for lost browser session and local DNS/Cloudflare caveats.
+
+Acceptance checks
+- [ ] kiosk-sensors and kiosk-browser run under same configured user without manual edits.
+- [ ] Day/night mode switches correctly at least once across a forced time boundary.
+- [ ] Input wake works after touch device enumeration changes/reboots.
+- [ ] Brightness and gamma always have a valid fallback and don’t fail silently.
