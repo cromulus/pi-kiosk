@@ -659,12 +659,15 @@ install -d -m 1777 -o root -g root /tmp/.X11-unix
 
 systemctl daemon-reload
 systemctl disable --now kiosk-sensors.service kiosk-vnc.service >/dev/null 2>&1 || true
-systemctl reenable --now "kiosk-browser@${KIOSK_USER}.service"
-systemctl reenable --now "kiosk-sensors@${KIOSK_USER}.service"
+systemctl enable "kiosk-browser@${KIOSK_USER}.service"
+systemctl restart "kiosk-browser@${KIOSK_USER}.service"
+systemctl enable "kiosk-sensors@${KIOSK_USER}.service"
+systemctl restart "kiosk-sensors@${KIOSK_USER}.service"
 
 load_existing_config
 if [[ "${ENABLE_VNC,,}" == "true" ]]; then
-  systemctl reenable --now "kiosk-vnc@${KIOSK_USER}.service"
+  systemctl enable "kiosk-vnc@${KIOSK_USER}.service"
+  systemctl restart "kiosk-vnc@${KIOSK_USER}.service"
 else
   systemctl disable --now "kiosk-vnc@${KIOSK_USER}.service" >/dev/null 2>&1 || true
 fi
