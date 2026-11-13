@@ -63,6 +63,9 @@ class KioskConfig(BaseModel):
     night_brightness: int = Field(
         default=35, validation_alias="NIGHT_BRIGHTNESS", ge=0, le=255
     )
+    sleep_schedule: bool = Field(default=False, validation_alias="SLEEP_SCHEDULE")
+    sleep_start: str = Field(default="23:00", validation_alias="SLEEP_START")
+    sleep_end: str = Field(default="06:00", validation_alias="SLEEP_END")
 
     daylight_schedule: str = Field(default="fixed", validation_alias="DAYLIGHT_SCHEDULE")
     daylight_light_start: str = Field(
@@ -98,6 +101,9 @@ class KioskConfig(BaseModel):
     )
     ha_motion_poll_interval_sec: float = Field(
         default=0.5, validation_alias="HA_MOTION_POLL_INTERVAL_SEC", ge=0.2, le=10.0
+    )
+    ha_motion_request_timeout_sec: float = Field(
+        default=2.0, validation_alias="HA_MOTION_REQUEST_TIMEOUT_SEC", ge=0.2, le=10.0
     )
     presence_hold_sec: int = Field(
         default=180, validation_alias="PRESENCE_HOLD_SEC", ge=1, le=3600
@@ -226,7 +232,7 @@ class KioskConfig(BaseModel):
             raise ValueError(f"unknown timezone {value!r}") from exc
         return value
 
-    @field_validator("daylight_light_start", "daylight_dark_start")
+    @field_validator("daylight_light_start", "daylight_dark_start", "sleep_start", "sleep_end")
     @classmethod
     def _validate_hhmm(cls, value: str) -> str:
         try:
@@ -263,6 +269,8 @@ class KioskConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_cross_field_settings(self) -> "KioskConfig":
+        if self.sleep_schedule and self.sleep_start == self.sleep_end:
+            raise ValueError("SLEEP_START and SLEEP_END must differ")
         if self.daylight_schedule == "sun" and (
             self.daylight_latitude is None or self.daylight_longitude is None
         ):

@@ -7,7 +7,7 @@ import time
 from typing import Optional
 
 from .config import ConfigError, KioskConfig, load_config
-from .daylight import current_daylight_window, is_dark, seconds_until_transition
+from .daylight import current_daylight_window, is_dark, is_sleep_time, seconds_until_transition
 from .display import ScreenController
 from .logging_utils import setup_logging
 from .presence import HomeAssistantMotion, InputActivityMonitor
@@ -80,7 +80,7 @@ def run(argv: Optional[list[str]] = None) -> None:
     signal.signal(signal.SIGINT, _shutdown)
 
     last_presence_ts = time.monotonic()
-    if config.enable_idle_screensaver:
+    if config.enable_idle_screensaver or config.sleep_schedule:
         last_presence_ts -= config.presence_hold_sec + 1
     last_health_log = 0.0
 
@@ -109,16 +109,22 @@ def run(argv: Optional[list[str]] = None) -> None:
 
             if presence_detected:
                 last_presence_ts = now
-                screen.wake_screen()
 
             presence_active = (now - last_presence_ts) <= config.presence_hold_sec
             dark_mode = is_dark(config)
+            sleep_mode = is_sleep_time(config)
+            sleep_idle = sleep_mode and not presence_active
             scheduled_brightness = screen.brightness_from_lux(
                 readings.ambient_lux,
                 dark_mode=dark_mode,
             )
 
-            if config.enable_idle_screensaver and not presence_active:
+            if sleep_idle:
+                screen.set_screensaver(True)
+                target_brightness = 0
+                fade_seconds = 0.0
+                gamma_profile = config.gamma_idle
+            elif config.enable_idle_screensaver and not presence_active and not config.sleep_schedule:
                 screen.set_screensaver(True)
                 target_brightness = config.idle_brightness
                 fade_seconds = config.brightness_fade_idle_sec
@@ -130,10 +136,16 @@ def run(argv: Optional[list[str]] = None) -> None:
                 gamma_profile = config.gamma_night if dark_mode else config.gamma_day
 
             screen.set_gamma_profile(gamma_profile)
-            screen.set_brightness(target_brightness, fade_seconds=fade_seconds)
+            screen.set_brightness(target_brightness, fade_seconds=fade_seconds, allow_off=sleep_idle)
+
+            if sleep_idle:
+                screen.sleep_screen()
+            elif config.sleep_schedule or presence_detected:
+                screen.wake_screen()
 
             if (
                 distance_capable
+                and not config.sleep_schedule
                 and not config.enable_idle_screensaver
                 and (now - last_presence_ts) > config.inactivity_timeout_sec
             ):

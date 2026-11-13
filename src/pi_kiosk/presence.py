@@ -36,6 +36,7 @@ class HomeAssistantMotion:
         self._token = config.ha_access_token
         self._entity_id = config.ha_motion_entity_id
         self._poll_interval = config.ha_motion_poll_interval_sec
+        self._request_timeout = config.ha_motion_request_timeout_sec
         self._next_poll = 0.0
         self._state: Optional[bool] = None
         self._last_warning = 0.0
@@ -58,11 +59,11 @@ class HomeAssistantMotion:
         )
 
         try:
-            timeout = max(0.2, min(1.0, self._poll_interval))
-            with urlopen(request, timeout=timeout) as response:
+            with urlopen(request, timeout=self._request_timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (OSError, URLError, json.JSONDecodeError) as exc:
             self._warn(now, f"Unable to poll Home Assistant motion sensor: {exc}")
+            self._state = None
             return self._state
 
         state = str(payload.get("state", "")).lower()

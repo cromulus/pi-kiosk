@@ -138,6 +138,36 @@ simply refresh binaries, the venv, and systemd units.
 4. Customize any sensor thresholds or brightness bounds while you are there.
 5. Reboot (or `sudo systemctl restart kiosk-browser@kiosk kiosk-sensors`).
 
+## Overnight display behavior
+
+To keep the screen on during the day, dim it from sunset to sunrise, and turn
+the backlight off from 11pm to 6am unless motion or touch is detected, edit
+`/etc/pi-kiosk/kiosk.env`:
+
+```ini
+DAYLIGHT_SCHEDULE=sun
+DAYLIGHT_TIMEZONE=America/New_York
+# Set DAYLIGHT_LATITUDE and DAYLIGHT_LONGITUDE to your actual location.
+BRIGHTNESS_SCHEDULE=true
+BRIGHTNESS_MIN=1
+NIGHT_BRIGHTNESS=1
+SLEEP_SCHEDULE=true
+SLEEP_START=23:00
+SLEEP_END=06:00
+PRESENCE_HOLD_SEC=180
+```
+
+The solar schedule requires both location coordinates. Brightness 1 is the
+lowest nonzero controller value; confirm readability on your panel. Overnight
+idle explicitly sets brightness to zero and requests DPMS off. Motion or touch
+wakes it for three minutes after the last activity. At 6am it resumes continuous
+display, still dim until sunrise. This opt-in schedule overrides the existing
+all-day screensaver and distance inactivity timeout. Without it, those behaviors
+remain unchanged. The Pi needs a working motion source or touchscreen to wake.
+
+After deploying the updated code, restart `kiosk-sensors@kiosk`. Existing installs
+retain their configuration, so add these settings explicitly.
+
 ## Service overview
 - `kiosk-browser@kiosk.service`  
   Launches Xorg + Chromium on VT7 in full kiosk mode. Controlled by
@@ -177,9 +207,68 @@ user through templated systemd units. Journald captures logs
   If the kiosk returns to the HA login page after a reboot or refresh, first
   verify that the Chromium profile under `/home/<kiosk-user>/.config/chromium`
   is writable and persistent, then log in once through VNC or the local display.
-  For the most reliable unattended setup, prefer a LAN Home Assistant URL and
-  Home Assistant trusted-network policy over Cloudflare/reverse-proxy frontend
-  authentication.
+  When using Cloudflare, follow the routing and login notes below.
+
+## Access through Cloudflare
+
+Set `HA_BASE_URL` to the public HTTPS dashboard URL and `HA_API_BASE_URL` to
+the same HTTPS origin, without a dashboard path. Keep `HA_EXTRA_QUERY` and
+the existing API token. For example:
+
+```ini
+HA_BASE_URL="https://your-ha-host/lovelace/kiosk"
+HA_API_BASE_URL="https://your-ha-host"
+HA_EXTRA_QUERY="kiosk=true"
+```
+
+Remove any `/etc/hosts` or local DNS override that maps this hostname directly
+to Home Assistant's LAN address. Check `getent ahosts your-ha-host` on the Pi;
+it should resolve to Cloudflare when that is the intended route. Back up
+`/etc/hosts` and `/etc/pi-kiosk/kiosk.env` before editing, then restart
+`kiosk-browser@kiosk` and `kiosk-sensors@kiosk`.
+
+LAN trusted-network login may no longer apply through Cloudflare. Log in to
+Home Assistant once on the kiosk and select **Keep me logged in**. A Cloudflare
+Access login, if configured, is a separate authentication layer; the motion
+poller currently sends only the Home Assistant bearer token and cannot answer
+interactive challenges or supply Cloudflare Access service-token headers.
+
+Verify the dashboard, authenticated motion polling, and WebSocket connectivity
+through the public hostname. Routing the kiosk through Cloudflare does not
+itself restrict direct access to the Home Assistant server.
+
+## Unexpected shutdown and automatic power-on
+
+Screen sleep only blanks the display; it does not shut down Linux. If SSH/VNC
+still works during an apparent outage, inspect the display and kiosk services.
+The installer enables the browser and sensor services at boot, and both units
+use `Restart=always`. Confirm those settings on the installed host, since the
+repository does not establish the live service state.
+
+To capture read-only evidence on the Pi, run:
+
+```bash
+sudo bash scripts/diagnose_power.sh
+```
+
+The report includes uptime/reboot history, current and historical power flags
+since boot, temperature, EEPROM settings, enabled services, prior-boot logs
+when available, and X display resolution. It does not print `kiosk.env` or its
+Home Assistant token. An optional first argument overrides the kiosk account.
+
+The installer enables persistent journald storage with a 128 MB limit and
+14-day retention. This overrides Pi OS's volatile storage default so previous
+boot evidence survives restarts. The live file is
+`/etc/systemd/journald.conf.d/90-pi-kiosk-journal.conf`.
+
+On Pi 5, `WAIT_FOR_POWER_BUTTON=0` is the EEPROM setting for booting when power
+is applied instead of waiting for the button. Inspect the actual board and
+EEPROM configuration before changing it. This does not prevent a power supply
+failure, revive a machine halted while power stays connected, or diagnose why
+it shut down. A runtime hardware watchdog can recover some OS hangs, but does
+not solve loss of electrical power or an intentional shutdown.
+
+See the [official bootloader documentation](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#WAIT_FOR_POWER_BUTTON).
 
 ## Development flow
 - Modify files locally → `git commit` → `git push`.

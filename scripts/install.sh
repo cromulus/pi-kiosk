@@ -658,6 +658,12 @@ EOF
 install -d -m 1777 -o root -g root /tmp/.X11-unix
 
 systemctl daemon-reload
+log_step "Keeping bounded logs across reboots"
+install -d /etc/systemd/journald.conf.d
+install -m 644 "${REPO_ROOT}/config/90-pi-kiosk-journal.conf" \
+  /etc/systemd/journald.conf.d/90-pi-kiosk-journal.conf
+systemctl restart systemd-journald
+journalctl --flush
 systemctl disable --now kiosk-sensors.service kiosk-vnc.service >/dev/null 2>&1 || true
 systemctl enable "kiosk-browser@${KIOSK_USER}.service"
 systemctl restart "kiosk-browser@${KIOSK_USER}.service"

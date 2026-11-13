@@ -183,6 +183,19 @@ def is_dark(config: KioskConfig, now: Optional[datetime] = None) -> bool:
     return now < window.light_start or now >= window.dark_start
 
 
+def is_sleep_time(config: KioskConfig, now: Optional[datetime] = None) -> bool:
+    """Fixed local sleep window, independent of sunrise and sunset."""
+    if not config.sleep_schedule:
+        return False
+    tzinfo = _configured_timezone(config)
+    local_now = now.astimezone(tzinfo) if now else datetime.now(tzinfo)
+    seconds = local_now.hour * 3600 + local_now.minute * 60 + local_now.second
+    start, end = parse_hhmm(config.sleep_start), parse_hhmm(config.sleep_end)
+    if start > end:
+        return seconds >= start or seconds < end
+    return start <= seconds < end
+
+
 def seconds_until_transition(config: KioskConfig, now: Optional[datetime] = None) -> int:
     tzinfo = _configured_timezone(config)
     now = now.astimezone(tzinfo) if now else datetime.now(tzinfo)

@@ -155,8 +155,10 @@ class ScreenController:
         self._run_display_cmd(["xset", "dpms", "force", "off"])
         self._state.screen_on = False
 
-    def set_brightness(self, target: int, fade_seconds: float = 0.0) -> None:
+    def set_brightness(self, target: int, fade_seconds: float = 0.0, allow_off: bool = False) -> None:
         min_b, max_b = self._config.as_brightness_bounds()
+        if allow_off and target == 0:
+            min_b = 0
         target = int(max(min_b, min(max_b, target)))
 
         if self._state.brightness == target:

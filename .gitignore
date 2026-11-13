@@ -15,3 +15,8 @@ venv/
 dist/
 build/
 *.egg-info/
+
+# Local credentials
+.envrc
+.env
+artifacts/private/
